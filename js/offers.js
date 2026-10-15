@@ -1,6 +1,6 @@
 /* Glitch-Simulator – Daten: Szenario-Buttons (PRESETS) und Challenge-Angebote (OFFERS).
    Stand der Angebote: 15.10.2026. Fee = Preis mit aktuellem Rabattcode, ohne belegten Code der Listenpreis.
-   Alpha Futures: pro Eintrag src (Quelle), asof (Stand) und rules (Rohregeln).
+   Alpha Futures und Lucid: pro Eintrag src (Quelle), asof (Stand) und rules (Rohregeln).
    Quellen und offene Punkte: siehe CLAUDE.md. */
 (function(root){
   'use strict';
@@ -57,14 +57,77 @@
       target:direct?0:goal,target2:0,dd:mll,buf:0,minp,wfrac:50,cap:payoutMax,split:90,maxp:5,
       src:AF_SRC[plan],asof:'2026-10-15',rules,note:regeln+' '+annahmen};
   };
+  // ---- Lucid Trading: Regeln aus support.lucidtrading.com (Artikel Juli/Aug. 2026), Preise lucidtrading.com/#plans, Stand 15.10.2026 ----
+  // fee = VAULT-Preis (rules.codePrice), rules.price = Listenpreis.
+  // Gewählt ist je Plan die strengste Konfiguration: Flex/Pro DLL an, Daily DLL an + Eval intraday, Direct fest. Abbildung: siehe CLAUDE.md.
+  const LU_SRC={
+    flex:'https://support.lucidtrading.com/en/articles/12945790-lucidflex-evaluation-account',
+    pro:'https://support.lucidtrading.com/en/articles/12890029-lucidpro-evaluation-account',
+    daily:'https://support.lucidtrading.com/en/articles/15996664-luciddaily-evaluation',
+    direct:'https://support.lucidtrading.com/en/articles/12890148-luciddirect-funded-account'};
+  const LU_SIZE={25:[2,20],50:[4,40],100:[6,60],150:[10,100]}; // max. Mini/Micro
+  // Größe, Liste, VAULT, Reset, Ziel, MLL, Trail-Balance, DLL Eval, DLL Funded, plus planeigene Werte
+  const LU_ROWS=[
+    // Flex: … Cap (fest), Tagesminimum der 5 Gewinntage, Aktionspreis
+    ['flex',25,89,65.30,65,1250,1000,26100,600,600,{cap:1000,winDayMin:100,promo:50.30}],
+    ['flex',50,146,105.20,105,3000,2000,52100,1200,1200,{cap:2000,winDayMin:150,promo:90.20}],
+    ['flex',100,293,215.60,215,6000,3000,103100,1800,1800,{cap:2500,winDayMin:200,promo:170.60}],
+    ['flex',150,407,295.40,295,9000,4500,154600,2700,2700,{cap:3000,winDayMin:250,promo:250.40}],
+    // Pro: … Zyklusziel, Cap 1. / ab 2. Auszahlung, Aktionspreis
+    ['pro',25,123,90.60,90,1250,1000,26100,600,600,{cycle:250,cap1:1000,cap2:1500,promo:70.60}],
+    ['pro',50,192,140.40,140,3000,2000,52100,1200,1200,{cycle:500,cap1:2000,cap2:2500,promo:115.40}],
+    ['pro',100,307,225.40,225,6000,3000,103100,1800,1800,{cycle:750,cap1:2500,cap2:3000,promo:180.40}],
+    ['pro',150,410,300.50,300,9000,4500,154600,2700,2700,{cycle:1000,cap1:3000,cap2:3500,promo:245.50}],
+    // Daily: … automatisch live ab Tagesgewinn, Liste EOD-Variante, Aktionspreis
+    ['daily',25,104,80.30,80,1250,1000,26100,600,600,{live:6000,eod:118,promo:55.30}],
+    ['daily',50,138,105.60,105,3000,2000,52100,1200,1200,{live:8000,eod:166,promo:75.60}],
+    ['daily',100,224,170.30,170,6000,3000,103100,1800,1800,{live:10000,eod:267,promo:125.30}],
+    ['daily',150,313,235.60,235,9000,4500,154600,2700,2700,{live:12000,eod:375,promo:180.60}],
+    // Direct: kein Reset, kein Ziel; … Zyklusziel 1./2.+, Cap Auszahlung 1–3 / 4–5
+    ['direct',25,329,230.30,null,null,1000,26100,null,null,{cycle1:1500,cycle2:1250,cap1:1000,cap2:1000}],
+    ['direct',50,515,360.50,null,null,2000,52100,null,1200,{cycle1:3000,cycle2:2500,cap1:2000,cap2:2500}],
+    ['direct',100,700,490.00,null,null,3500,103600,null,2100,{cycle1:6000,cycle2:3500,cap1:2500,cap2:3000}],
+    ['direct',150,836,585.20,null,null,5000,155100,null,3000,{cycle1:9000,cycle2:4500,cap1:3000,cap2:3500}]
+  ];
+  const LU = ([plan,size,price,codePrice,reset,goal,mll,trailBalance,dlgEval,dlgFunded,x])=>{
+    const NAME={flex:'Flex',pro:'Pro',daily:'Daily',direct:'Direct'}, direct=plan==='direct';
+    const fmt=v=>v.toLocaleString('de-DE'), eur=v=>v.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const r={price,codePrice,reset,target:goal,mll,mllType:plan==='daily'?'intraday-trailing-lock-start100':'eod-trailing-lock-start100',trailBalance,
+      dlgEval,dlgFunded,dlgType:'soft',dlgScaleFunded:null,consEval:null,consFunded:null,payoutMin:500,payoutCap1:null,payoutCap2:null,payoutFrac:null,
+      winDays:null,winDayMin:null,cycleTarget1:null,cycleTarget2:null,bufferMll100:false,maxPayouts:null,liveAtDailyProfit:null,minDaysPayout:null,
+      maxMini:LU_SIZE[size][0],maxMicro:LU_SIZE[size][1],config:null,billing:'once'};
+    let k, regeln;
+    if(plan==='flex'){
+      Object.assign(r,{consEval:50,payoutCap1:x.cap,payoutCap2:x.cap,payoutFrac:0.5,winDays:5,winDayMin:x.winDayMin,maxPayouts:5,config:'DLL an'});
+      k={buf:100,wfrac:50,cap:x.cap,minp:Math.max(2*500,5*x.winDayMin)};
+      regeln=`Eval-Consistency 50 %. Auszahlung nach 5 Tagen ≥ ${fmt(x.winDayMin)} $ je Zyklus, Netto-Zyklusgewinn > 0, max. 50 % des Gewinns, Cap ${fmt(x.cap)} $ (fest), max. 5 Auszahlungen, dann live. Nach jeder Auszahlung springt das MLL auf Start + 100 $.`;
+    } else if(plan==='pro'){
+      Object.assign(r,{dlgScaleFunded:0.6,consFunded:40,payoutCap1:x.cap1,payoutCap2:x.cap2,cycleTarget1:x.cycle,cycleTarget2:x.cycle,bufferMll100:true,config:'DLL an'});
+      k={buf:mll+100,wfrac:100,cap:x.cap1,minp:Math.max(500,x.cycle)};
+      regeln=`Funded-Consistency 40 %. Funded-DLL über der Trail-Balance 60 % des höchsten EOD-Gewinns. Puffer MLL + 100 $, Zyklusziel ${fmt(x.cycle)} $, Cap ${fmt(x.cap1)} $ (1. Auszahlung), danach ${fmt(x.cap2)} $.${size===25?' DLL 25k: DLL-Artikel sagt „None“, Funded-Artikel und Website 600 $; es gilt 600 $ (konservativ).':''}`;
+    } else if(plan==='daily'){
+      Object.assign(r,{consEval:50,bufferMll100:true,liveAtDailyProfit:x.live,config:'DLL an, Intraday'});
+      k={buf:mll+100,wfrac:100,cap:x.live,minp:500};
+      regeln=`Eval-Consistency 50 %. Eval und Funded intraday-trailing. Puffer MLL + 100 $, Netto-Zyklusgewinn > 0, kein Auszahlungs-Cap, ab ${fmt(x.live)} $ Tagesgewinn automatisch live. EOD-Variante: Liste ${fmt(x.eod)} $.`;
+    } else {
+      Object.assign(r,{dlgScaleFunded:size===25?null:0.6,consFunded:20,payoutCap1:x.cap1,payoutCap2:x.cap2,cycleTarget1:x.cycle1,cycleTarget2:x.cycle2,maxPayouts:5,minDaysPayout:5,config:'fest'});
+      k={buf:100,wfrac:100,cap:x.cap1,minp:x.cycle1};
+      regeln=`Consistency 20 %, DLL ${dlgFunded==null?'keiner':fmt(dlgFunded)+' $'}${size===25?'':', über der Trail-Balance 60 % des höchsten EOD-Gewinns'}. Zyklusziel ${fmt(x.cycle1)} $, ab 2. Zyklus ${fmt(x.cycle2)} $. Cap ${fmt(x.cap1)} $ (Auszahlung 1–3), ${fmt(x.cap2)} $ (4–5), max. 5 Auszahlungen, min. 5 Tage bis zur Auszahlung (Website).`;
+    }
+    const allg=`${direct?'':`DLL ${fmt(dlgEval)} $ Eval / ${fmt(dlgFunded)} $ Funded (soft). `}Max. ${r.maxMini} Mini/${r.maxMicro} Micro. VAULT-Preis ${eur(codePrice)} $${reset!=null?`, Reset ${fmt(reset)} $`:''}${x.promo?`; Aktionspreis „Limited time“ ${eur(x.promo)} $ ohne Enddatum`:''}.`;
+    const annahmen=[`Annahmen: Lock bei Start+100, Kern lockt bei Start (100 $ milder).`];
+    if(plan!=='daily') annahmen.push('EOD-trailing, Kern pro Trade (strenger).');
+    if(plan==='flex') annahmen.push(`minp ${fmt(k.minp)} $ = max(2 × 500 $; 5 × ${fmt(x.winDayMin)} $).`);
+    if(plan==='pro') annahmen.push(`cap = Cap der 1. Auszahlung (konservativ). maxp 5: Quelle nennt kein Maximum, Konvention.`);
+    if(plan==='daily') annahmen.push(`cap ${fmt(x.live)} $ = Tagesgewinn bis Live (Proxy, es gibt keinen Cap). maxp 5: Konvention.`);
+    if(direct) annahmen.push(`minp = 1. Zyklusziel und cap = Cap Auszahlung 1–3 für alle Zyklen (konservativ).`);
+    return {id:`lu-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code:'VAULT',
+      target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:k.cap,split:90,maxp:5,
+      src:LU_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
+  };
   const OFFERS=[
     {g:'Alpha Futures · CME-Futures · Eval monatlich, Direct einmalig', items:AF_ROWS.map(AF)},
-    {g:'Lucid Trading · NQ-Futures · einmalig', items:[
-      {id:'lu-flex-50',n:'Flex 50k',mode:'challenge',fee:88,list:'146 $',code:'VIBES (−40 %)',target:3000,dd:2000,buf:100,minp:750,wfrac:50,cap:2000,split:90,maxp:5,note:'Eval-Consistency 50 %. Payout nach 5 Tagen ≥ 150 $, max. 50 % des Gewinns. Funded-Kontrakte skalieren.'},
-      {id:'lu-pro-50',n:'Pro 50k',mode:'challenge',fee:115,list:'192 $',code:'VIBES (−40 %)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:2000,split:90,maxp:5,note:'Keine Eval-Consistency, Funded 40 %. Puffer 52.100 $, erste Auszahlung max. 2.000 $, danach 2.500 $.'},
-      {id:'lu-daily-50',n:'Daily 50k',mode:'challenge',fee:94,list:'156 $',code:'VIBES (−40 %)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:100000,split:90,maxp:5,note:'Eval-Consistency 50 %. Funded Drawdown intraday. Auszahlung täglich über 52.100 $ möglich.'},
-      {id:'lu-direct-50',n:'Direct 50k (ohne Challenge)',mode:'instant',fee:309,list:'515 $',code:'VIBES (−40 %)',target:0,dd:2000,buf:0,minp:3000,wfrac:100,cap:2000,split:90,maxp:5,note:'Erster Zyklus 3.000 $ Gewinn, danach 2.500 $. Consistency 20 %, Daily Loss 1.200 $.'}
-    ]},
+    {g:'Lucid Trading · Futures · einmalig', items:LU_ROWS.map(LU)},
     {g:'MyFundedFutures · NQ-Futures · monatlich', items:[
       {id:'mf-rapid-50',n:'Rapid 50k',mode:'challenge',fee:79,list:'157 $/Monat',code:'50 % (Juni 2026)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:100000,split:90,maxp:5,note:'Eval-Consistency 50 %. Funded Drawdown intraday, Puffer 2.100 $, Auszahlung täglich.'},
       {id:'mf-builder-50',n:'Builder 50k',mode:'challenge',fee:77,list:'153 $/Monat',code:'50 % (Juni 2026)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:2000,split:80,maxp:5,note:'Funded-Consistency 50 %, Daily Loss 1.000 $ (soft), Auszahlung alle 48 h.'},
