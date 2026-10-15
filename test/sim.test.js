@@ -56,9 +56,8 @@ test('alle Angebote laufen ohne NaN', () => {
 // ---- Alpha-Futures-Katalog (M-010a) ----
 const AF = OFFERS.find(gr => gr.g.startsWith('Alpha Futures')).items;
 
-test('Alpha Futures hat 13 Einträge, insgesamt 36 Angebote', () => {
+test('Alpha Futures hat 13 Einträge', () => {
   assert.strictEqual(AF.length, 13);
-  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 36);
 });
 
 test('Alpha-Futures-Einträge haben Quelle, Stand und Rohregeln', () => {
@@ -91,6 +90,39 @@ test('Alpha Futures: Direct ist Instant, alle anderen 1-Step-Challenge', () => {
 test('alle Angebots-ids sind eindeutig', () => {
   const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
   assert.strictEqual(new Set(ids).size, ids.length);
+});
+
+// ---- Lucid-Katalog (M-010b) ----
+const LU = OFFERS.find(gr => gr.g.startsWith('Lucid')).items;
+
+test('Lucid hat 16 Einträge, insgesamt 48 Angebote (36 − 4 + 16)', () => {
+  assert.strictEqual(LU.length, 16);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 48);
+});
+
+test('Lucid-Einträge haben Quelle, Stand, Rohregeln und Code VAULT', () => {
+  for (const o of LU) {
+    assert.ok(typeof o.src === 'string' && o.src.startsWith('https://support.lucidtrading.com/'), o.id);
+    assert.strictEqual(o.asof, '2026-10-15', o.id);
+    assert.ok(o.rules && typeof o.rules === 'object', o.id);
+    assert.strictEqual(o.code, 'VAULT', o.id);
+  }
+});
+
+test('Lucid-Kernfelder passen zu den Rohregeln', () => {
+  for (const o of LU) {
+    assert.strictEqual(o.fee, o.rules.price, o.id + ' fee');
+    assert.strictEqual(o.dd, o.rules.mll, o.id + ' dd');
+    assert.strictEqual(o.split, 90, o.id + ' split');
+    if (/^lu-(pro|daily)-/.test(o.id)) assert.strictEqual(o.buf, o.rules.mll + 100, o.id + ' buf');
+  }
+});
+
+test('Lucid: Direct ist Instant, alle anderen 1-Step-Challenge', () => {
+  for (const o of LU) {
+    if (o.id.startsWith('lu-direct-')) { assert.strictEqual(o.mode, 'instant', o.id); assert.strictEqual(o.target, 0, o.id); }
+    else { assert.strictEqual(o.mode, 'challenge', o.id); assert.strictEqual(o.target2, 0, o.id); }
+  }
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
