@@ -182,18 +182,59 @@
       target:goal,target2:0,dd:mll,buf:mll+100,minp:k.minp,wfrac:100,cap:k.cap,split:k.split,maxp:k.maxp,
       src:MF_SRC[plan][size],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
   };
+  // ---- FundedNext Futures: Regeln aus helpfutures.fundednext.com (Artikel Sept./Okt. 2026), Preise fundednext.com/de/futures (Screenshots 15.10.2026) ----
+  // fee = Codepreis 1. Account (rules.codePrice), rules.price = Listenpreis. Website vor Help-Center. Abbildung: siehe CLAUDE.md.
+  const FN_SRC={
+    flex:'https://helpfutures.fundednext.com/en/articles/17229829-fundednext-futures-flex-challenge-all-rules',
+    rp:'https://helpfutures.fundednext.com/en/articles/17229677-fundednext-futures-rapid-pro-challenge-all-rules',
+    direct:'https://helpfutures.fundednext.com/en/articles/17430065-fundednext-futures-direct-account-all-rules'};
+  // Plan, Größe, Liste, Codepreis (1. Account), Codepreis Folge-Accounts, Reset, Ziel, MLL, Lock, Mini, Micro, plus planeigene Werte
+  const FN_ROWS=[
+    // Flex: … Benchmark-Tagesminimum, Cap
+    ['flex',50,141.99,74.99,84.99,82.99,2500,1500,50100,3,30,{bench:200,cap:1500}],
+    ['flex',100,273.99,145.13,159.99,157.99,5000,2500,100100,5,50,{bench:200,cap:2500}],
+    ['flex',150,490.99,259.99,289.99,284.99,8000,4000,150100,8,80,{bench:250,cap:4000}],
+    // Rapid Pro: … Cap
+    ['rp',25,159.98,79.99,84.99,84.99,1500,1000,25100,2,20,{cap:800}],
+    ['rp',50,299.98,159.99,174.99,174.99,3000,2000,50100,4,40,{cap:1200}],
+    ['rp',100,499.98,279.99,299.99,299.99,5000,2500,100100,6,60,{cap:2500}],
+    // Direct: kein Reset, kein Ziel
+    ['direct',50,283.99,169.99,null,null,null,2000,50100,3,30,{cap:1200}]
+  ];
+  const FN = ([plan,size,price,codePrice,codeNext,reset,goal,mll,mllLock,maxMini,maxMicro,x])=>{
+    const NAME={flex:'Flex',rp:'Rapid Pro',direct:'Direct'}, CODE={flex:'FNFLEX',rp:'RAPID',direct:'FNDIRECT'}, direct=plan==='direct';
+    const fmt=v=>v.toLocaleString('de-DE'), eur=v=>v.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const r={price,codePrice,codePriceFrom3rd:codeNext,reset,target:goal,mll,mllLock,mllFixedAfterFirstPayout:null,dlgEval:null,dlgFunded:null,dlgType:null,
+      consEval:null,consEvalMode:null,consFunded:null,consFundedMode:null,benchmarkDays:null,benchmarkMin:null,cycleProfitMin:null,payoutMin:null,
+      payoutCap:x.cap,payoutFrac:null,payoutEveryDays:null,buffer:null,maxPayouts:5,maxMini,maxMicro,inactivityDays:null,billing:'once'};
+    let k, regeln;
+    if(plan==='flex'){
+      Object.assign(r,{mllFixedAfterFirstPayout:true,consEval:40,consEvalMode:'target',benchmarkDays:5,benchmarkMin:x.bench,cycleProfitMin:500,payoutMin:250,payoutFrac:0.5});
+      k={buf:100,wfrac:50,minp:Math.max(500,5*x.bench,2*250),split:95};
+      regeln=`Eval-Consistency: bester Tag ≤ 40 % des Profit-Ziels, sonst steigt das Ziel auf bester Tag ÷ 0,4. Funded ohne Consistency. Kein DLL. Auszahlung nach 5 Benchmark-Tagen ≥ ${fmt(x.bench)} $ je Zyklus, Zyklusgewinn ≥ 500 $, min. 250 $, max. 50 % des Gewinns, Cap ${fmt(x.cap)} $. Die 1. Auszahlung setzt das MLL fest auf Start + 100 $. Nach 5 Auszahlungen beendet. Codepreis ab dem 3. Account ${eur(codeNext)} $.${size===100?' Kachel 144,99 $, Checkout 145,13 $; es gilt 145,13 $ (konservativ).':''}`;
+    } else if(plan==='rp'){
+      Object.assign(r,{consFunded:40,consFundedMode:'cycle',cycleProfitMin:500,payoutMin:250,payoutEveryDays:3});
+      k={buf:100,wfrac:100,minp:500,split:90};
+      regeln=`Eval ohne Consistency. Funded-Consistency 40 % (bester Tag ÷ Zyklusgewinn). Kein DLL; DLL-Add-On laut Help-Center (günstiger) ist auf der Website nicht sichtbar, nicht verwendet. Auszahlung alle 3 Tage, Zyklusgewinn ≥ 500 $, min. 250 $, max. ${fmt(x.cap)} $, kein Puffer. Nach 5 Auszahlungen beendet. Codepreis ab dem 2. Account ${eur(codeNext)} $ (in rules.codePriceFrom3rd).`;
+    } else {
+      Object.assign(r,{mllFixedAfterFirstPayout:true,dlgFunded:1000,dlgType:'soft',consFunded:20,consFundedMode:'perpetual-best-day',payoutMin:800,buffer:2100,inactivityDays:7});
+      k={buf:2100,wfrac:100,minp:800,split:90};
+      regeln=`Instant, kein Reset. DLL 1.000 $ (soft, inkl. offener Positionen und Gebühren). Consistency 20 % „perpetual“: bester Tag aller Zeiten ≤ 20 % des aktuellen Zyklusgewinns. Puffer 2.100 $, Auszahlung min. 800 $, max. 1.200 $. Die 1. Auszahlung setzt das MLL fest auf 50.100 $. Nach 5 Auszahlungen beendet. Mindestens 1 Trade pro Woche, sonst Breach.`;
+    }
+    const allg=`MLL EOD-trailing, Bruch intraday auf Equity. Max. ${maxMini} Mini/${maxMicro} Micro (1:10). Einmalgebühr, keine Aktivierungsgebühr. ${CODE[plan]}-Preis ${eur(codePrice)} $${reset!=null?`, Reset ${eur(reset)} $`:''}.`;
+    const annahmen=['Annahmen: EOD-trailing, Kern pro Trade (strenger); Lock bei Start + 100, Kern bei Start (100 $ milder).'];
+    if(plan==='flex') annahmen.push(`Eval-Consistency gegen Profit-Ziel, Kern ignoriert (bis M-003). buf 100 = MLL fest bei Start + 100 nach der 1. Auszahlung. minp ${fmt(k.minp)} $ = max(500 $; 5 × ${fmt(x.bench)} $; 2 × 250 $).`);
+    if(plan==='rp') annahmen.push('buf 100 (konservativ: nach dem Lock muss das Konto über Start + 100 bleiben). Funded-Consistency nicht im Kern.');
+    if(direct) annahmen.push('DLL, Consistency und Wochen-Trade nicht im Kern.');
+    return {id:`fn-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code:CODE[plan],
+      target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:x.cap,split:k.split,maxp:5,
+      src:FN_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
+  };
   const OFFERS=[
     {g:'Alpha Futures · CME-Futures · Eval monatlich, Direct einmalig', items:AF_ROWS.map(AF)},
     {g:'Lucid Trading · Futures · einmalig', items:LU_ROWS.map(LU)},
     {g:'MyFundedFutures · Futures · einmalig', items:MF_ROWS.map(MF)},
-    {g:'FundedNext Futures · einmalig', items:[
-      {id:'fn-rd-50',n:'Rapid Daily 50k',mode:'challenge',fee:159,list:'299,98 $',code:'Rabatt (Partner)',target:3000,dd:2000,buf:0,minp:500,wfrac:100,cap:1200,split:90,maxp:5,note:'Keine Consistency. Daily Loss 1.000 $ (soft). Auszahlung täglich, max. 1.200 $ pro Zyklus. Bots erlaubt.'},
-      {id:'fn-rp-50',n:'Rapid Pro 50k',mode:'challenge',fee:159,list:'299,98 $',code:'Rabatt (Partner)',target:3000,dd:2000,buf:0,minp:500,wfrac:100,cap:1200,split:90,maxp:5,note:'Funded-Consistency 40 %. Auszahlung alle 3 Tage, max. 1.200 $. Bots erlaubt.'},
-      {id:'fn-legacy-50',n:'Legacy 50k',mode:'challenge',fee:180,list:'199,99 $',code:'Rabatt (Partner)',target:3000,dd:2000,buf:0,minp:1000,wfrac:100,cap:6000,split:80,maxp:5,note:'Eval-Consistency 40 %. Benchmark-Tage vor erster Auszahlung, alle 5 Tage.'},
-      {id:'fn-flex-50',n:'Flex 50k',mode:'challenge',fee:71,list:'133,99 $',code:'Rabatt (Partner)',target:2500,dd:1500,buf:0,minp:1000,wfrac:100,cap:2500,split:80,maxp:5,note:'Eval-Consistency 40 %. 5 Benchmark-Tage ≥ 200 $, alle 5 Tage. 90 % Split per Add-on.'},
-      {id:'fn-legacy-100',n:'Legacy 100k',mode:'challenge',fee:216,list:'239,99 $',code:'Rabatt (Partner)',target:6000,dd:3000,buf:0,minp:1000,wfrac:100,cap:6000,split:80,maxp:5,note:'Eval-Consistency 40 %. Auszahlungsdeckel für 100k aus 50k übernommen.'},
-      {id:'fn-flex-100',n:'Flex 100k',mode:'challenge',fee:133,list:'249,99 $',code:'Rabatt (Partner)',target:5000,dd:2500,buf:0,minp:1000,wfrac:100,cap:2500,split:80,maxp:5,note:'Eval-Consistency 40 %. Auszahlungsdeckel für 100k nicht bestätigt.'}
-    ]},
+    {g:'FundedNext Futures · einmalig', items:FN_ROWS.map(FN)},
     {g:'Alpha Capital · CFD (NAS100, Gold) · einmalig', items:[
       Object.assign({id:'ac-d-2.5',n:'Direct 2,5k'},AC(2500,30,'30 $','–')),
       Object.assign({id:'ac-d-5',n:'Direct 5k'},AC(5000,67,'67 $','–')),
