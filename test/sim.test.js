@@ -71,6 +71,7 @@ test('Alpha-Futures-Einträge haben Quelle, Stand und Rohregeln', () => {
 test('Alpha-Futures-Kernfelder passen zu den Rohregeln', () => {
   for (const o of AF) {
     const r = o.rules;
+    assert.strictEqual(o.fee, r.price, o.id + ' fee = Listenpreis');
     assert.strictEqual(o.dd, r.mll, o.id + ' dd');
     assert.strictEqual(o.cap, r.payoutMax, o.id + ' cap');
     if (o.mode === 'instant') assert.strictEqual(o.target, 0, o.id + ' target');
@@ -111,7 +112,9 @@ test('Lucid-Einträge haben Quelle, Stand, Rohregeln und Code VAULT', () => {
 
 test('Lucid-Kernfelder passen zu den Rohregeln', () => {
   for (const o of LU) {
-    assert.strictEqual(o.fee, o.rules.price, o.id + ' fee');
+    assert.strictEqual(o.fee, o.rules.codePrice, o.id + ' fee = VAULT-Preis');
+    assert.ok(o.fee < o.rules.price, o.id + ' VAULT unter Liste');
+    assert.strictEqual(o.list, `${o.rules.price} $ einmalig`, o.id + ' list');
     assert.strictEqual(o.dd, o.rules.mll, o.id + ' dd');
     assert.strictEqual(o.split, 90, o.id + ' split');
     if (/^lu-(pro|daily)-/.test(o.id)) assert.strictEqual(o.buf, o.rules.mll + 100, o.id + ' buf');

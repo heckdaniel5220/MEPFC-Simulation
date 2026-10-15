@@ -58,6 +58,7 @@
       src:AF_SRC[plan],asof:'2026-10-15',rules,note:regeln+' '+annahmen};
   };
   // ---- Lucid Trading: Regeln aus support.lucidtrading.com (Artikel Juli/Aug. 2026), Preise lucidtrading.com/#plans, Stand 15.10.2026 ----
+  // fee = VAULT-Preis (rules.codePrice), rules.price = Listenpreis.
   // Gewählt ist je Plan die strengste Konfiguration: Flex/Pro DLL an, Daily DLL an + Eval intraday, Direct fest. Abbildung: siehe CLAUDE.md.
   const LU_SRC={
     flex:'https://support.lucidtrading.com/en/articles/12945790-lucidflex-evaluation-account',
@@ -120,7 +121,7 @@
     if(plan==='pro') annahmen.push(`cap = Cap der 1. Auszahlung (konservativ). maxp 5: Quelle nennt kein Maximum, Konvention.`);
     if(plan==='daily') annahmen.push(`cap ${fmt(x.live)} $ = Tagesgewinn bis Live (Proxy, es gibt keinen Cap). maxp 5: Konvention.`);
     if(direct) annahmen.push(`minp = 1. Zyklusziel und cap = Cap Auszahlung 1–3 für alle Zyklen (konservativ).`);
-    return {id:`lu-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:price,list:`${price} $ einmalig`,code:'VAULT',
+    return {id:`lu-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code:'VAULT',
       target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:k.cap,split:90,maxp:5,
       src:LU_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
   };
