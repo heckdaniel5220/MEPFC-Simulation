@@ -53,4 +53,44 @@ test('alle Angebote laufen ohne NaN', () => {
   }
 });
 
+// ---- Alpha-Futures-Katalog (M-010a) ----
+const AF = OFFERS.find(gr => gr.g.startsWith('Alpha Futures')).items;
+
+test('Alpha Futures hat 13 Einträge, insgesamt 36 Angebote', () => {
+  assert.strictEqual(AF.length, 13);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 36);
+});
+
+test('Alpha-Futures-Einträge haben Quelle, Stand und Rohregeln', () => {
+  for (const o of AF) {
+    assert.ok(typeof o.src === 'string' && o.src.startsWith('https://help.alpha-futures.com/'), o.id);
+    assert.strictEqual(o.asof, '2026-10-15', o.id);
+    assert.ok(o.rules && typeof o.rules === 'object', o.id);
+  }
+});
+
+test('Alpha-Futures-Kernfelder passen zu den Rohregeln', () => {
+  for (const o of AF) {
+    const r = o.rules;
+    assert.strictEqual(o.dd, r.mll, o.id + ' dd');
+    assert.strictEqual(o.cap, r.payoutMax, o.id + ' cap');
+    if (o.mode === 'instant') assert.strictEqual(o.target, 0, o.id + ' target');
+    else assert.strictEqual(o.target, r.target, o.id + ' target');
+    assert.strictEqual(o.wfrac, 50, o.id + ' wfrac');
+    assert.strictEqual(o.split, 90, o.id + ' split');
+  }
+});
+
+test('Alpha Futures: Direct ist Instant, alle anderen 1-Step-Challenge', () => {
+  for (const o of AF) {
+    if (o.id.startsWith('af-direct-')) assert.strictEqual(o.mode, 'instant', o.id);
+    else { assert.strictEqual(o.mode, 'challenge', o.id); assert.strictEqual(o.target2, 0, o.id); }
+  }
+});
+
+test('alle Angebots-ids sind eindeutig', () => {
+  const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
+  assert.strictEqual(new Set(ids).size, ids.length);
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

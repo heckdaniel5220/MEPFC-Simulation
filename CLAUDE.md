@@ -42,9 +42,21 @@ test/sim.test.js  Tests für den Kern (node, ohne Abhängigkeiten)
 5. **Max. offenes Risiko pro Asset** (Alpha Capital Direct 1 %) wird nur über die Risikovorgabe der Angebotsauswahl eingehalten, nicht im Kern geprüft.
 6. **Lot-/Kontraktlimits, Slippage-Verteilung, Gaps/News** fehlen.
 7. Funded-Phase bei 2-Step-Plänen startet immer bei 0 Gewinn, Puffer-Regeln einzelner Firmen sind vereinfacht.
+8. **Alpha Futures (M-010a erledigt)**, offen: Scaling-Plan (Funded) nicht erfasst, Gebühren-PDF (Kommissionen je Kontrakt) nicht ausgewertet, Codepreise ohne Quelle (ALPHA40/ALPHA50 entfernt, `fee` = Listenpreis).
 
 ## Daten (js/offers.js) – Stand 15.10.2026
-- **Alpha Futures**: Preise und 50k-Regeln von alpha-futures.com (offiziell, 15.10.). Advanced 100k/150k Ziel/DD aus TradeTanto. Auszahlbarer Anteil bei Standard nicht offiziell bestätigt.
+- **Alpha Futures** (13 Einträge: Zero, Standard, Advanced je 25k/50k/100k bzw. 50k/100k/150k, Direct 25k–150k): offizielles Help Center, Artikel Juli/Aug. 2026, abgerufen 15.10.2026. Pro Eintrag `src` (Plan-Übersicht), `asof: '2026-10-15'` und `rules` (Rohregeln, `null` = Regel gilt nicht; vom Kern noch nicht gelesen, Datenbasis für M-002 bis M-006).
+  - Zero https://help.alpha-futures.com/en/articles/11771813-zero-account-overview
+  - Standard https://help.alpha-futures.com/en/articles/11632512-standard-account-overview
+  - Advanced https://help.alpha-futures.com/en/articles/11634907-advanced-account-overview
+  - Direct https://help.alpha-futures.com/en/articles/15838742-direct-account-overview
+  - MLL https://help.alpha-futures.com/en/articles/9491999-maximum-loss-limit-mll
+  - Daily Loss Guard https://help.alpha-futures.com/en/articles/9492014-daily-loss-guard
+  - Consistency https://help.alpha-futures.com/en/articles/9492048-consistency-rule
+  - Payout https://help.alpha-futures.com/en/articles/9492051-payout-policy
+  - Instrumente https://help.alpha-futures.com/en/articles/9492096-what-and-when-you-can-trade
+  - **Abbildung auf Kernfelder**: Zero/Standard/Advanced `mode 'challenge'`, `target2 0`; Direct `mode 'instant'`, `target 0`. `dd` = MLL, trailing mit Lock bei Start (MLL ist EOD-trailing, der Kern zieht pro Trade nach = konservativ bis M-001/M-002). `buf 0` (MLL lockt bei Start, Auszahlung senkt es nicht). `wfrac 50` für alle (Direct ohne offizielle Angabe, konservativ). `cap` = Auszahlung max., `split 90`, `maxp 5`. `minp`: Zero/Standard max(2 × Auszahlung min; 5 × 200 $) = 1.000 $, Advanced 2.000 $, Direct = 1. Auszahlungsziel für alle Zyklen. `fee` = Listenpreis, `code '–'`: für ALPHA40/ALPHA50 ist keine Quelle belegt.
+  - **Nicht im Kern**: Daily Loss Guard (soft, 2 % der Startbalance, nicht bei Standard-Eval und Advanced), Consistency (Eval gesamt, Funded seit letztem Antrag), 5 Gewinntage ≥ 200 $, max. 4 Anträge/Monat, Direct-Zyklen 1./2.+ Ziel, Kontraktlimits, News, flat bis 16:20 ET, Monatsabo.
 - **Lucid Trading**: PropTradingVibes (Listenpreise 16.09.2026, Code VIBES −40 %).
 - **MyFundedFutures**: PropTradingVibes + PropFirmMap (Preise Juni 2026, Code −50 %). Monatliche Abrechnung.
 - **FundedNext Futures**: DamnPropFirms (Partner-Seite) + PipBack. Bots erlaubt.
