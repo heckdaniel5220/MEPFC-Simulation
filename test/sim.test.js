@@ -96,9 +96,8 @@ test('alle Angebots-ids sind eindeutig', () => {
 // ---- Lucid-Katalog (M-010b) ----
 const LU = OFFERS.find(gr => gr.g.startsWith('Lucid')).items;
 
-test('Lucid hat 16 Einträge, insgesamt 48 Angebote (36 − 4 + 16)', () => {
+test('Lucid hat 16 Einträge', () => {
   assert.strictEqual(LU.length, 16);
-  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 48);
 });
 
 test('Lucid-Einträge haben Quelle, Stand, Rohregeln und Code VAULT', () => {
@@ -126,6 +125,49 @@ test('Lucid: Direct ist Instant, alle anderen 1-Step-Challenge', () => {
     if (o.id.startsWith('lu-direct-')) { assert.strictEqual(o.mode, 'instant', o.id); assert.strictEqual(o.target, 0, o.id); }
     else { assert.strictEqual(o.mode, 'challenge', o.id); assert.strictEqual(o.target2, 0, o.id); }
   }
+});
+
+// ---- MyFundedFutures-Katalog (M-010c) ----
+const MF = OFFERS.find(gr => gr.g.startsWith('MyFundedFutures')).items;
+
+test('MFFU hat 11 Einträge, insgesamt 56 Angebote (48 − 3 + 11)', () => {
+  assert.strictEqual(MF.length, 11);
+  assert.deepStrictEqual(MF.map(o => o.id), ['mf-rapid-25', 'mf-rapid-50', 'mf-rapid-100', 'mf-rapid-150', 'mf-pro-50', 'mf-pro-100', 'mf-pro-150',
+    'mf-builder-25', 'mf-builder-50', 'mf-builder-100', 'mf-builder-150']);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 56);
+});
+
+test('MFFU-Einträge haben Quelle, Stand, Rohregeln und Code CLUB', () => {
+  for (const o of MF) {
+    assert.ok(typeof o.src === 'string' && o.src.startsWith('https://help.myfundedfutures.com/'), o.id);
+    assert.strictEqual(o.asof, '2026-10-15', o.id);
+    assert.ok(o.rules && typeof o.rules === 'object', o.id);
+    assert.strictEqual(o.code, 'CLUB', o.id);
+  }
+});
+
+test('MFFU-Kernfelder passen zu den Rohregeln', () => {
+  for (const o of MF) {
+    assert.strictEqual(o.fee, o.rules.codePrice, o.id + ' fee = CLUB-Preis');
+    assert.ok(o.fee < o.rules.price, o.id + ' CLUB unter Liste');
+    assert.strictEqual(o.list, `${o.rules.price} $ einmalig`, o.id + ' list');
+    assert.strictEqual(o.dd, o.rules.mll, o.id + ' dd');
+    assert.strictEqual(o.buf, o.rules.mll + 100, o.id + ' buf');
+    assert.strictEqual(o.wfrac, 100, o.id + ' wfrac');
+    assert.strictEqual(o.split, o.id.startsWith('mf-rapid-') ? 90 : 80, o.id + ' split');
+  }
+});
+
+test('MFFU: alle 1-Step-Challenge mit trailing Drawdown', () => {
+  for (const o of MF) {
+    assert.strictEqual(o.mode, 'challenge', o.id);
+    assert.strictEqual(o.target2, 0, o.id);
+    assert.ok(!o.ddStatic, o.id);
+  }
+});
+
+test('MFFU-ids sind eindeutig', () => {
+  assert.strictEqual(new Set(MF.map(o => o.id)).size, MF.length);
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
