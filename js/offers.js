@@ -1,5 +1,6 @@
 /* Glitch-Simulator – Daten: Szenario-Buttons (PRESETS) und Challenge-Angebote (OFFERS).
-   Stand der Angebote: 15.10.2026. Fee = Preis mit aktuellem Rabattcode.
+   Stand der Angebote: 15.10.2026. Fee = Preis mit aktuellem Rabattcode, ohne belegten Code der Listenpreis.
+   Alpha Futures: pro Eintrag src (Quelle), asof (Stand) und rules (Rohregeln).
    Quellen und offene Punkte: siehe CLAUDE.md. */
 (function(root){
   'use strict';
@@ -14,17 +15,50 @@
   // ---- Alle recherchierten Challenge-Angebote (Fee = Preis mit aktuellem Code) ----
   const AC = (size,fee,list,code)=>({mode:'instant',fee,list,code,maxRisk:size*0.01,target:0,target2:0,dd:size*0.05,ddStatic:false,buf:size*0.03,minp:size*0.01,wfrac:100,cap:100000,split:90,maxp:5,
     note:'Ohne Challenge. Daily Loss 3 %, max. 1 % offenes Risiko pro Asset, 15 % Best-Day-Regel, kein Wochenende, Gegentrades verboten.'});
+  // ---- Alpha Futures: offizielle Regeln aus help.alpha-futures.com (Artikel Juli/Aug. 2026), Stand 15.10.2026 ----
+  // rules = Rohregeln (null = Regel gilt nicht), der Kern liest sie noch nicht. Abbildung auf Kernfelder: siehe CLAUDE.md.
+  const AF_SRC={
+    zero:'https://help.alpha-futures.com/en/articles/11771813-zero-account-overview',
+    std:'https://help.alpha-futures.com/en/articles/11632512-standard-account-overview',
+    adv:'https://help.alpha-futures.com/en/articles/11634907-advanced-account-overview',
+    direct:'https://help.alpha-futures.com/en/articles/15838742-direct-account-overview'};
+  // Eval: id, Name, Plan, Preis/Monat, Reset, Ziel, MLL, DLG Eval/Funded, Consistency Eval/Funded %, Auszahlung min/max, Mini/Micro, Scaling, News Funded
+  // Direct: id, Name, Plan, Preis einmalig, –, Auszahlungsziel 1./2.+, MLL, DLG, Consistency %, Auszahlung min/max, Mini/Micro, Scaling, News
+  const AF_ROWS=[
+    ['af-zero-25','Zero 25k','zero',89,79,1500,1000,500,500,null,40,200,1000,1,10,false,'eingeschränkt'],
+    ['af-zero-50','Zero 50k','zero',139,119,3000,2000,1000,1000,null,40,200,1500,3,30,true,'eingeschränkt'],
+    ['af-zero-100','Zero 100k','zero',279,249,6000,3000,2000,2000,null,40,200,2500,6,60,true,'eingeschränkt'],
+    ['af-std-50','Standard 50k','std',129,109,3000,2000,null,1000,50,40,500,3000,5,50,true,'eingeschränkt'],
+    ['af-std-100','Standard 100k','std',239,199,6000,3000,null,2000,50,40,500,4000,10,100,true,'eingeschränkt'],
+    ['af-std-150','Standard 150k','std',349,289,9000,4500,null,3000,50,40,500,5000,15,150,true,'eingeschränkt'],
+    ['af-adv-50','Advanced 50k','adv',209,189,4000,1750,null,null,40,null,1000,15000,5,50,false,'keine'],
+    ['af-adv-100','Advanced 100k','adv',349,319,8000,3500,null,null,40,null,1000,15000,10,100,false,'keine'],
+    ['af-adv-150','Advanced 150k','adv',489,449,12000,5250,null,null,40,null,1000,15000,15,150,false,'keine'],
+    ['af-direct-25','Direct 25k','direct',349,null,[1500,1000],1000,null,500,null,20,500,1000,2,20,false,'eingeschränkt'],
+    ['af-direct-50','Direct 50k','direct',519,null,[3000,2000],2000,null,1000,null,20,500,2000,4,40,false,'eingeschränkt'],
+    ['af-direct-100','Direct 100k','direct',689,null,[6000,4000],3000,null,2000,null,20,500,2500,8,80,false,'eingeschränkt'],
+    ['af-direct-150','Direct 150k','direct',859,null,[9000,6000],4500,null,3000,null,20,500,3000,10,100,false,'eingeschränkt']
+  ];
+  const AF = ([id,n,plan,price,reset,goal,mll,dlgEval,dlgFunded,consEval,consFunded,payoutMin,payoutMax,maxMini,maxMicro,scaling,newsFunded])=>{
+    const direct=plan==='direct';
+    const rules={price,reset,target:direct?null:goal,mll,mllType:'eod-trailing-lock-start',dlgEval,dlgFunded,dlgType:'soft',consEval,consFunded,
+      payoutMin,payoutMax,payoutFrac:direct?null:0.5,winDays:direct?null:5,winDayMin:direct?null:200,maxReqPerMonth:direct?null:4,
+      wTarget1:direct?goal[0]:null,wTarget2:direct?goal[1]:null,maxMini,maxMicro,scaling,newsFunded,flatBy:'16:20 ET',billing:direct?'once':'monthly'};
+    // minp: Eval = max(2 × Mindestauszahlung; 5 Gewinntage × 200 $), Direct = 1. Auszahlungsziel für alle Zyklen
+    const minp=direct?goal[0]:Math.max(2*payoutMin,5*200);
+    const fmt=v=>v.toLocaleString('de-DE');
+    const regeln=[
+      `DLG ${dlgEval==null&&dlgFunded==null?'keiner':(direct?fmt(dlgFunded)+' $':`Eval ${dlgEval==null?'–':fmt(dlgEval)+' $'}, Funded ${dlgFunded==null?'–':fmt(dlgFunded)+' $'}`)+' (soft)'}`,
+      `Consistency ${direct?consFunded+' %':`Eval ${consEval==null?'–':consEval+' %'}, Funded ${consFunded==null?'–':consFunded+' %'}`}`,
+      direct?`Auszahlungsziel ${fmt(goal[0])} $, ab 2. Antrag ${fmt(goal[1])} $, je Zyklus neu`:`Auszahlung nach 5 Gewinntagen ≥ 200 $, max. 50 % des Gewinns, max. 4 Anträge/Monat`,
+      `Auszahlung ${fmt(payoutMin)}–${fmt(payoutMax)} $, max. ${maxMini} Mini/${maxMicro} Micro, Scaling ${scaling?'ja':'nein'}, News Funded ${newsFunded}, flat bis 16:20 ET`].join('. ')+'.';
+    const annahmen=`Annahmen: MLL EOD-trailing, Kern pro Trade (konservativ bis M-001/M-002). minp ${fmt(minp)} $ ${direct?'= 1. Auszahlungsziel für alle Zyklen':'nähert Gewinntage und Mindestauszahlung an'}. wfrac 50 %${direct?' ohne offizielle Angabe (konservativ)':''}. Fee = Listenpreis, kein belegter Rabattcode.`;
+    return {id,n,mode:direct?'instant':'challenge',fee:price,list:direct?`${price} $ einmalig`:`${price} $/Monat`,code:'–',
+      target:direct?0:goal,target2:0,dd:mll,buf:0,minp,wfrac:50,cap:payoutMax,split:90,maxp:5,
+      src:AF_SRC[plan],asof:'2026-10-15',rules,note:regeln+' '+annahmen};
+  };
   const OFFERS=[
-    {g:'Alpha Futures · NQ-Futures · monatlich', items:[
-      {id:'af-zero-25',n:'Zero 25k',mode:'challenge',fee:53,list:'89 $/Monat',code:'ALPHA40',target:1500,dd:1000,buf:0,minp:1000,wfrac:50,cap:1000,split:90,maxp:5,note:'Payout nach 5 Gewinntagen ≥ 200 $. Funded-Consistency 40 %, Daily Loss 500 $ (soft).'},
-      {id:'af-zero-50',n:'Zero 50k',mode:'challenge',fee:83,list:'139 $/Monat',code:'ALPHA40',target:3000,dd:2000,buf:0,minp:1000,wfrac:50,cap:1500,split:90,maxp:5,note:'Payout nach 5 Gewinntagen ≥ 200 $, max. 50 % des Gewinns. Funded-Consistency 40 %, Daily Loss 1.000 $ (soft).'},
-      {id:'af-zero-100',n:'Zero 100k',mode:'challenge',fee:167,list:'279 $/Monat',code:'ALPHA40',target:6000,dd:3000,buf:0,minp:1000,wfrac:50,cap:2500,split:90,maxp:5,note:'Payout nach 5 Gewinntagen ≥ 200 $. Funded-Consistency 40 %, Daily Loss 2.000 $ (soft).'},
-      {id:'af-std-50',n:'Standard 50k',mode:'challenge',fee:65,list:'129 $/Monat',code:'ALPHA50',target:3000,dd:2000,buf:0,minp:1000,wfrac:100,cap:3000,split:90,maxp:5,note:'Eval-Consistency 50 %, Funded 40 %, Funded Daily Loss 1.000 $. Auszahlbarer Anteil nicht offiziell bestätigt.'},
-      {id:'af-adv-50',n:'Advanced 50k',mode:'challenge',fee:105,list:'209 $/Monat',code:'ALPHA50',target:4000,dd:1750,buf:0,minp:2000,wfrac:50,cap:15000,split:90,maxp:5,note:'Eval-Consistency 40 %. 50 % des Gewinns auszahlbar bis 30 Gewinntage ≥ 200 $, Mindestauszahlung 1.000 $.'},
-      {id:'af-adv-100',n:'Advanced 100k',mode:'challenge',fee:175,list:'349 $/Monat',code:'ALPHA50',target:8000,dd:3500,buf:0,minp:2000,wfrac:50,cap:15000,split:90,maxp:5,note:'Ziel und Drawdown aus Drittquelle (TradeTanto).'},
-      {id:'af-adv-150',n:'Advanced 150k',mode:'challenge',fee:245,list:'489 $/Monat',code:'ALPHA50',target:12000,dd:5250,buf:0,minp:2000,wfrac:50,cap:15000,split:90,maxp:5,note:'Ziel und Drawdown aus Drittquelle (TradeTanto).'},
-      {id:'af-direct-50',n:'Direct 50k (ohne Challenge)',mode:'instant',fee:260,list:'519 $ einmalig',code:'ALPHA50',target:0,dd:2000,buf:0,minp:3000,wfrac:100,cap:2000,split:90,maxp:5,note:'Erster Payout nach 3.000 $ Zyklusgewinn, danach 2.000 $. Consistency 20 %, Daily Loss 1.000 $.'}
-    ]},
+    {g:'Alpha Futures · CME-Futures · Eval monatlich, Direct einmalig', items:AF_ROWS.map(AF)},
     {g:'Lucid Trading · NQ-Futures · einmalig', items:[
       {id:'lu-flex-50',n:'Flex 50k',mode:'challenge',fee:88,list:'146 $',code:'VIBES (−40 %)',target:3000,dd:2000,buf:100,minp:750,wfrac:50,cap:2000,split:90,maxp:5,note:'Eval-Consistency 50 %. Payout nach 5 Tagen ≥ 150 $, max. 50 % des Gewinns. Funded-Kontrakte skalieren.'},
       {id:'lu-pro-50',n:'Pro 50k',mode:'challenge',fee:115,list:'192 $',code:'VIBES (−40 %)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:2000,split:90,maxp:5,note:'Keine Eval-Consistency, Funded 40 %. Puffer 52.100 $, erste Auszahlung max. 2.000 $, danach 2.500 $.'},
