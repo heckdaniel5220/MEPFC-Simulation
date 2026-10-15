@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Glitch-Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Glitch-Simulator</h1>
+    <p>Hunderte Prop-Accounts, Trade für Trade simuliert: einmal ganz normal, einmal mit dem Echtgeld-Gegentrade („Insurance“) aus den Videos. Beide Varianten laufen auf exakt denselben Kursbewegungen, damit nur der Hedge den Unterschied macht.</p>
+  </header>
+
+  <div class="presets" role="group" aria-label="Szenario wählen">
+    <button type="button" id="p-futures" aria-pressed="true">Futures 50k (Whiteboard)</button>
+    <button type="button" id="p-coin" aria-pressed="false">Seine Annahme: ein Münzwurf-Trade</button>
+    <button type="button" id="p-edge" aria-pressed="false">Futures 50k mit echtem Edge</button>
+    <button type="button" id="p-afstd" aria-pressed="false">Alpha Futures Standard 50k (~65 $)</button>
+    <button type="button" id="p-instant" aria-pressed="false">Alpha Capital Direct 50k (97 $)</button>
+  </div>
+
+  <div class="grid">
+    <form class="panel controls" id="ctl" onsubmit="return false">
+      <fieldset class="offer-box">
+        <legend>Challenge-Angebot (Stand 15.10.2026)</legend>
+        <div class="ctl">
+          <label for="offer">Firma &amp; Plan wählen</label>
+          <select id="offer" class="sel"><option value="">– eigene Werte –</option></select>
+        </div>
+        <label class="check"><input type="checkbox" id="autorisk" checked> Risiko &amp; Kosten an Account-Größe anpassen</label>
+        <div class="offer-note" id="offer-note">Wähle ein Angebot. Fee, Ziel, Drawdown und Payout-Regeln werden automatisch gesetzt.</div>
+      </fieldset>
+      <fieldset>
+        <legend>Modell</legend>
+        <div class="ctl">
+          <label for="mode">Account-Art</label>
+          <select id="mode" style="font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink)">
+            <option value="challenge">Challenge, danach Funded</option>
+            <option value="instant">Instant Funding (ohne Challenge)</option>
+          </select>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Account &amp; Regeln</legend>
+        <div class="ctl"><div class="row"><label for="fee">Fee pro Account</label><output id="fee-o"></output></div><input type="range" id="fee" min="20" max="600" step="1"></div>
+        <div class="ctl" id="w-target"><div class="row"><label for="target">Challenge-Ziel (Phase 1)</label><output id="target-o"></output></div><input type="range" id="target" min="500" max="6000" step="100"></div>
+        <div class="ctl" id="w-target2"><div class="row"><label for="target2">Ziel Phase 2 (0 = 1-Step)</label><output id="target2-o"></output></div><input type="range" id="target2" min="0" max="6000" step="100"></div>
+        <label class="check"><input type="checkbox" id="ddstatic"> Statischer Drawdown (fest ab Startkapital)</label>
+        <div class="ctl"><div class="row"><label for="dd">Max. Drawdown (trailing, Lock bei Start)</label><output id="dd-o"></output></div><input type="range" id="dd" min="500" max="5000" step="100"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Trading</legend>
+        <div class="ctl"><div class="row"><label for="risk">Risiko pro Trade</label><output id="risk-o"></output></div><input type="range" id="risk" min="50" max="3000" step="50"></div>
+        <div class="ctl"><div class="row"><label for="rr">Chance-Risiko (CRV)</label><output id="rr-o"></output></div><input type="range" id="rr" min="0.5" max="4" step="0.1"></div>
+        <div class="ctl"><div class="row"><label for="wr">Trefferquote</label><output id="wr-o"></output></div><input type="range" id="wr" min="10" max="80" step="1"><small id="wr-hint"></small></div>
+        <div class="ctl"><div class="row"><label for="cost">Kosten pro Trade (Spread + Kommission)</label><output id="cost-o"></output></div><input type="range" id="cost" min="0" max="60" step="1"></div>
+      </fieldset>
+
+      <fieldset class="hedge-legend">
+        <legend>Gegentrade auf Echtgeld-Konto</legend>
+        <div class="ctl"><div class="row"><label for="hp">Größe Gegentrade (in % der Prop-Position)</label><output id="hp-o"></output></div><input type="range" id="hp" min="0" max="30" step="0.5"><small id="hp-hint"></small></div>
+        <div class="btnrow"><button type="button" class="btn" id="calib">Wie im Video: Fee + kleiner Gewinn zurück</button></div>
+        <small class="note">Wie im Video läuft der Gegentrade nur, bis die Challenge bestanden ist. Bei Instant Funding läuft er bis zur ersten Auszahlung.</small>
+        <label class="check"><input type="checkbox" id="hfund"> Gegentrade danach weiterlaufen lassen</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Payout-Regeln (Funded)</legend>
+        <div class="ctl"><div class="row"><label for="buf">Puffer über Start</label><output id="buf-o"></output></div><input type="range" id="buf" min="0" max="3000" step="50"></div>
+        <div class="ctl"><div class="row"><label for="minp">Mindestgewinn über Puffer</label><output id="minp-o"></output></div><input type="range" id="minp" min="100" max="3000" step="50"></div>
+        <div class="ctl"><div class="row"><label for="wfrac">Auszahlbarer Anteil vom Gewinn</label><output id="wfrac-o"></output></div><input type="range" id="wfrac" min="20" max="100" step="5"></div>
+        <div class="ctl"><div class="row"><label for="cap">Max. pro Auszahlung</label><output id="cap-o"></output></div><input type="range" id="cap" min="500" max="10000" step="100"></div>
+        <div class="ctl"><div class="row"><label for="split">Split</label><output id="split-o"></output></div><input type="range" id="split" min="50" max="100" step="5"></div>
+        <div class="ctl"><div class="row"><label for="maxp">Max. Auszahlungen pro Account</label><output id="maxp-o"></output></div><input type="range" id="maxp" min="1" max="10" step="1"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Simulation</legend>
+        <div class="ctl"><div class="row"><label for="n">Anzahl Accounts</label><output id="n-o"></output></div><input type="range" id="n" min="10" max="2000" step="10"></div>
+        <div class="btnrow"><button type="button" class="btn" id="reroll">Neu würfeln</button></div>
+      </fieldset>
+    </form>
+
+    <div class="results">
+      <div class="kpis">
+        <div class="kpi"><div class="lab"><span class="dot" style="background:var(--nohedge)"></span>Ohne Gegentrade</div><div class="val" id="k-no"></div><div class="sub" id="k-no-s"></div></div>
+        <div class="kpi"><div class="lab"><span class="dot" style="background:var(--hedge)"></span>Mit Gegentrade (Glitch)</div><div class="val" id="k-he"></div><div class="sub" id="k-he-s"></div></div>
+        <div class="kpi"><div class="lab"><span class="dot" style="background:var(--real)"></span>Echtgeld-Konto</div><div class="val" id="k-real"></div><div class="sub" id="k-real-s"></div></div>
+      </div>
+
+      <div class="verdict" id="verdict"></div>
+
+      <div class="panel">
+        <h2>Kontostand über alle Accounts</h2>
+        <div class="chart-wrap"><svg id="chart" viewBox="0 0 760 300" width="100%" role="img" aria-label="Kumuliertes Ergebnis mit und ohne Gegentrade"></svg></div>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--nohedge)"></i>Netto ohne Gegentrade</span>
+          <span><i class="sw" style="background:var(--hedge)"></i>Netto mit Gegentrade</span>
+          <span><i class="sw" style="background:var(--real);height:0;border-top:2px dashed var(--real)"></i>Davon Echtgeld-Konto (Gegentrade)</span>
+        </div>
+      </div>
+
+      <div class="two">
+        <div class="panel">
+          <h2>Seine Rechnung vs. Simulation</h2>
+          <div class="calc" id="calc"></div>
+        </div>
+        <div class="panel">
+          <h2>Wo das Geld hingeht</h2>
+          <div class="tbl"><table id="flow"></table></div>
+          <p class="note" id="outc"></p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Die ersten 12 Accounts im Detail</h2>
+        <div class="tbl"><table id="trace"></table></div>
+        <p class="note">Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
+      </div>
+
+      <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft, Consistency-Regeln, die 15 %-Best-Day-Regel von Alpha Direct und Slippage sind nicht abgebildet. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
+    </div>
+  </div>
+</div>
+
+<script src="js/sim.js"></script>
+<script src="js/offers.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

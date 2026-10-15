@@ -1,0 +1,10 @@
+{
+  "name": "glitch-simulator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monte-Carlo-Simulation von Prop-Firm-Challenges mit und ohne Echtgeld-Gegentrade",
+  "scripts": {
+    "test": "node test/sim.test.js",
+    "start": "python3 -m http.server 8000"
+  }
+}
