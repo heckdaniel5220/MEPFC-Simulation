@@ -6,20 +6,21 @@
   const pct = v => fmt0.format(Math.round(v*100)) + ' %';
   const $ = id => document.getElementById(id);
 
-  const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
+  const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','tpd','dll','cons','consF','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const {PRESETS,OFFERS}=window.GlitchData;
   const {simulate}=window.GlitchSim;
   let seed = 20261015;
 
 
   function read(){
-    const P={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked};
+    const P={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked,dllHard:$('dllhard').checked};
     IDS.forEach(k=>P[k]=parseFloat($(k).value));
     return window.GlitchSim.prepare(P);
   }
   function apply(pr){
-    $('mode').value=pr.mode; $('hfund').checked=!!pr.hfund; $('ddstatic').checked=!!pr.ddStatic;
-    IDS.forEach(k=>{ const v = pr[k]!==undefined ? pr[k] : (k==='target2'?0:$(k).value); $(k).value=v; });
+    $('mode').value=pr.mode; $('hfund').checked=!!pr.hfund; $('ddstatic').checked=!!pr.ddStatic; $('dllhard').checked=!!pr.dllHard;
+    const ZERO={target2:1,dll:1,cons:1,consF:1};
+    IDS.forEach(k=>{ const v = pr[k]!==undefined ? pr[k] : (ZERO[k]?0:$(k).value); $(k).value=v; });
   }
 
 
@@ -60,6 +61,7 @@
     $('hp-hint').textContent=`Fee genau zurück = Fee ÷ Drawdown = ${String((calibH*100).toFixed(1)).replace('.',',')} %. Etwas mehr bringt beim Verlieren einen kleinen Gewinn. 0 % = kein Gegentrade.`;
     $('w-target').classList.toggle('dis',instant);
     $('w-target2').classList.toggle('dis',instant);
+    $('w-cons').classList.toggle('dis',instant);
 
     const R=simulate(P,seed);
     const n=P.n;
@@ -111,18 +113,23 @@
     $('outc').textContent = instant
       ? `${fmt0.format(R.fail+R.passNo)} von ${fmt0.format(n)} Accounts ohne Auszahlung verloren, ${fmt0.format(R.paid)} mit mindestens einer Auszahlung (insgesamt ${fmt0.format(R.nPayTot)} Auszahlungen).`
       : `${fmt0.format(R.fail)} von ${fmt0.format(n)} Challenges verloren, ${fmt0.format(R.passed)} bestanden. Davon ${fmt0.format(R.paid)} mit mindestens einer Auszahlung, ${fmt0.format(R.passNo)} vorher verloren.`;
+    const rules=[];
+    if(P.dll>0) rules.push(P.dllHard?`${fmt0.format(R.dllBreach)} Accounts am Daily Loss Limit verloren`:`${fmt0.format(R.dllStops)}× Handelstag am Daily Loss Limit beendet`);
+    if(P.ce>0) rules.push(`${fmt0.format(R.consWait)}× Ziel erreicht, aber wegen Consistency weitergehandelt`);
+    if(rules.length) $('outc').textContent+=' '+rules.join(', ')+'.';
+    $('outc').textContent+=` Ø ${fmt0.format(R.days/n)} Handelstage pro Account.`;
 
     // trace
-    let t=`<thead><tr><th>#</th><th>Ergebnis</th><th>Trades</th><th>Payouts</th><th>Echtgeld</th><th>Netto ohne</th><th>Netto mit</th></tr></thead><tbody>`;
+    let t=`<thead><tr><th>#</th><th>Ergebnis</th><th>Tage</th><th>Trades</th><th>Payouts</th><th>Echtgeld</th><th>Netto ohne</th><th>Netto mit</th></tr></thead><tbody>`;
     R.accts.forEach((a,i)=>{
-      const st = !a.passed ? '<span class="pill fail">Challenge verloren</span>' : a.nPay>0 ? `<span class="pill paid">${a.nPay}× ausgezahlt</span>` : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
-      t+=`<tr><td>${i+1}</td><td class="txt">${st}</td><td>${a.trades}</td><td>${a.pay?sgn(a.pay):'–'}</td><td class="${a.hedge>=0?'pos':'neg'}">${P.h? sgn(a.hedge):'–'}</td><td class="${a.netNo>=0?'pos':'neg'}">${sgn(a.netNo)}</td><td class="${a.netHe>=0?'pos':'neg'}">${sgn(a.netHe)}</td></tr>`;
+      const st = a.dllBreach && a.nPay===0 ? `<span class="pill fail">${a.passed?'':'Challenge '}Daily Loss verletzt</span>` : !a.passed ? '<span class="pill fail">Challenge verloren</span>' : a.nPay>0 ? `<span class="pill paid">${a.nPay}× ausgezahlt</span>` : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
+      t+=`<tr><td>${i+1}</td><td class="txt">${st}</td><td>${a.days}</td><td>${a.trades}</td><td>${a.pay?sgn(a.pay):'–'}</td><td class="${a.hedge>=0?'pos':'neg'}">${P.h? sgn(a.hedge):'–'}</td><td class="${a.netNo>=0?'pos':'neg'}">${sgn(a.netNo)}</td><td class="${a.netHe>=0?'pos':'neg'}">${sgn(a.netHe)}</td></tr>`;
     });
     $('trace').innerHTML=t+'</tbody>';
   }
 
   // Zahlenfelder neben jeden Regler setzen
-  const UNIT={fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:''};
+  const UNIT={fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',tpd:'×',dll:'$',cons:'%',consF:'%',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:''};
   const PRE={rr:'1 :'};
   IDS.forEach(k=>{
     const rg=$(k), out=$(k+'-o'); if(!out) return;
@@ -157,12 +164,13 @@
     const o=OFFER_BY[id]; if(!o){ $('offer-note').textContent='Eigene Werte. Wähle ein Angebot, um Fee, Ziel, Drawdown und Payout-Regeln automatisch zu setzen.'; return; }
     const cur=read();
     const pr={mode:o.mode,fee:o.fee,target:o.target||cur.target,target2:o.target2||0,dd:o.dd,ddStatic:!!o.ddStatic,buf:o.buf,minp:o.minp,wfrac:o.wfrac,cap:o.cap,split:o.split,maxp:o.maxp,
-      risk:cur.risk,rr:cur.rr,wr:cur.wr,cost:cur.cost,hfund:false,n:cur.n,
+      dll:o.dll||0,dllHard:!!o.dllHard,cons:o.cons||0,consF:o.consF||0,
+      risk:cur.risk,rr:cur.rr,wr:cur.wr,cost:cur.cost,tpd:cur.tpd,hfund:false,n:cur.n,
       hp:Math.min(30,Math.round(o.fee*1.25/o.dd*200)/2)};
     if($('autorisk').checked){ pr.risk=Math.max(10,Math.round(o.dd*0.25/5)*5); if(o.maxRisk) pr.risk=Math.min(pr.risk,o.maxRisk); pr.cost=Math.max(1,Math.round(pr.risk*0.02)); }
     apply(pr);
     const two=o.target2?` → ${usd(o.target2)}`:'';
-    $('offer-note').innerHTML=`<b>${o.n}</b>: ${o.mode==='instant'?'ohne Challenge':'Ziel '+usd(o.target)+two}, Drawdown ${usd(o.dd)} ${o.ddStatic?'statisch':'trailing'}. Fee ${usd(o.fee)} (Liste ${o.list}, Code ${o.code}).<br>${o.note}${$('autorisk').checked?`<br>Risiko pro Trade = 25 % des Drawdowns${o.maxRisk?', max. 1 % des Kontos (Firmenregel)':''}, Kosten = 2 % des Risikos.`:''}`;
+    $('offer-note').innerHTML=`<b>${o.n}</b>: ${o.mode==='instant'?'ohne Challenge':'Ziel '+usd(o.target)+two}, Drawdown ${usd(o.dd)} ${o.ddStatic?'statisch':'trailing'}${o.dll?`, Daily Loss ${usd(o.dll)} ${o.dllHard?'hart':'soft'}`:''}${o.cons?`, Challenge-Consistency ${o.cons} %`:''}${o.consF?`, Funded-Consistency ${o.consF} %`:''}. Fee ${usd(o.fee)} (Liste ${o.list}, Code ${o.code}).<br>${o.note}${$('autorisk').checked?`<br>Risiko pro Trade = 25 % des Drawdowns${o.maxRisk?', max. 1 % des Kontos (Firmenregel)':''}, Kosten = 2 % des Risikos.`:''}`;
   }
   $('offer').addEventListener('change',e=>{applyOffer(e.target.value);setPressed('');render();});
   $('autorisk').addEventListener('change',()=>{if($('offer').value){applyOffer($('offer').value);render();}});

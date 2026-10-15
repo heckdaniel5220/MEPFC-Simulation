@@ -9,50 +9,73 @@
 
   // Rohwerte aus der Oberfläche (Prozent als Zahl) in Simulationsparameter umrechnen
   function prepare(raw){
-    const P=Object.assign({target2:0,ddStatic:false,hfund:false},raw);
+    const P=Object.assign({target2:0,ddStatic:false,hfund:false,tpd:1,dll:0,dllHard:false,cons:0,consF:0},raw);
     P.p=P.wr/100; P.h=P.hp/100; P.wf=P.wfrac/100; P.sp=P.split/100;
+    P.tpd=Math.max(1,Math.round(P.tpd)); P.ce=P.cons/100; P.cf=P.consF/100;
     return P;
   }
 
   /* Simuliert P.n Accounts nacheinander.
      Jeder Trade: Gewinn risk*rr mit Wahrscheinlichkeit p, sonst Verlust risk, minus cost.
+     Handelstage: bis zu tpd Trades pro Tag. Jede Phase (und jeder Auszahlungszyklus) startet mit einem neuen Tag.
+     Daily Loss Limit (dll > 0): Tages-P&L ≤ −dll beendet den Tag (soft) bzw. den Account (dllHard).
+     Consistency: bester Tag ≤ cons % des Phasengewinns (Challenge) bzw. ≤ consF % des Zyklusgewinns (Funded/Instant),
+     sonst wird weitergehandelt. Bestehen bzw. Auszahlung beenden den Handelstag.
      Gegentrade (Echtgeld): -h * Brutto-Ergebnis - h * cost, nur in der Absicherungsphase
      (Challenge bzw. bei Instant Funding bis zur ersten Auszahlung), außer hfund=true. */
   function simulate(P, seed){
     const r=mulberry32(seed>>>0), MAXT=500;
     const res={accts:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
-      hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0};
+      hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0,days:0,dllStops:0,dllBreach:0,consWait:0};
     let real=0, cNo=0, cHe=0;
     for(let i=0;i<P.n;i++){
-      const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false};
+      const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false,days:0,dllStops:0,dllBreach:false};
+      // Tageszustand: P&L heute, Trades heute, bester abgeschlossener Tag im laufenden Zyklus
+      const D={pnl:0,n:0,best:0,open:false};
+      const newCycle=()=>{ D.pnl=0; D.n=0; D.best=0; D.open=false; };
+      const bestDay=()=>Math.max(D.best,D.pnl);
       const trade=(hedgeOn,phase)=>{
+        if(!D.open || D.n>=P.tpd){ if(D.open) D.best=Math.max(D.best,D.pnl); D.pnl=0; D.n=0; D.open=true; a.days++; }
         const gross = r()<P.p ? P.risk*P.rr : -P.risk;
-        a.trades++;
+        a.trades++; D.n++;
         if(hedgeOn){ const hv=-P.h*gross - P.h*P.cost; if(phase==='e') a.hedgeEval+=hv; else a.hedgeFund+=hv; real+=hv; if(real<res.realMin) res.realMin=real; }
-        return gross-P.cost;
+        const v=gross-P.cost; D.pnl+=v;
+        return v;
+      };
+      // Daily Loss Limit nach jedem Trade: true = Account verloren (hard)
+      const dailyLoss=()=>{
+        if(!(P.dll>0) || D.pnl>-P.dll) return false;
+        if(P.dllHard){ a.dllBreach=true; return true; }
+        a.dllStops++; D.n=P.tpd; return false; // soft: Rest des Tages wird nicht gehandelt
       };
       if(P.mode==='challenge'){
         const phases=[P.target]; if(P.target2>0) phases.push(P.target2);
         let ok=true;
         for(const tg of phases){
-          let eq=0,peak=0,done=false;
+          let eq=0,peak=0,done=false,waited=false; newCycle();
           for(let t=0;t<MAXT;t++){
             eq+=trade(P.h>0,'e'); if(eq>peak) peak=eq;
-            if(eq>=tg){done=true;break;}
+            if(eq>=tg){ if(!(P.ce>0) || bestDay()<=P.ce*eq){done=true;break;} waited=true; }
             const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor) break;
+            if(dailyLoss()) break;
           }
+          if(waited) res.consWait++;
           if(!done){ok=false;break;}
         }
         a.passed=ok;
       }
       if(a.passed){
-        let eq=0,peak=0;
+        let eq=0,peak=0,start=0; newCycle();
         for(let t=0;t<MAXT && a.nPay<P.maxp;t++){
           // Absicherungsphase: Challenge (oben) bzw. bei Instant Funding bis zur ersten Auszahlung
           const protect = P.mode==='instant' && a.nPay===0;
           eq+=trade(P.h>0 && (P.hfund||protect), protect?'e':'f'); if(eq>peak) peak=eq;
           const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){a.blown=true;break;}
-          if(eq>=P.buf+P.minp){ const w=Math.min(P.cap,(eq-P.buf)*P.wf); eq-=w; a.pay+=w*P.sp; a.nPay++; }
+          if(dailyLoss()){a.blown=true;break;}
+          if(eq>=P.buf+P.minp && (!(P.cf>0) || bestDay()<=P.cf*(eq-start))){
+            const w=Math.min(P.cap,(eq-P.buf)*P.wf); eq-=w; a.pay+=w*P.sp; a.nPay++;
+            start=eq; newCycle(); // neuer Auszahlungszyklus, Handelstag endet
+          }
         }
       }
       a.hedge=a.hedgeEval+a.hedgeFund;
@@ -61,6 +84,7 @@
       res.hAfter+=a.hedgeFund;
       a.netNo=a.pay-P.fee; a.netHe=a.netNo+a.hedge;
       res.fees+=P.fee; res.pay+=a.pay; res.hedge+=a.hedge; res.nPayTot+=a.nPay;
+      res.days+=a.days; res.dllStops+=a.dllStops; if(a.dllBreach) res.dllBreach++;
       if(a.passed) res.passed++;
       if(!a.passed) res.fail++; else if(a.nPay===0) res.passNo++; else res.paid++;
       cNo+=a.netNo; cHe+=a.netHe;

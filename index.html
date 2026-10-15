@@ -61,6 +61,15 @@
         <div class="ctl"><div class="row"><label for="rr">Chance-Risiko (CRV)</label><output id="rr-o"></output></div><input type="range" id="rr" min="0.5" max="4" step="0.1"></div>
         <div class="ctl"><div class="row"><label for="wr">Trefferquote</label><output id="wr-o"></output></div><input type="range" id="wr" min="10" max="80" step="1"><small id="wr-hint"></small></div>
         <div class="ctl"><div class="row"><label for="cost">Kosten pro Trade (Spread + Kommission)</label><output id="cost-o"></output></div><input type="range" id="cost" min="0" max="60" step="1"></div>
+        <div class="ctl"><div class="row"><label for="tpd">Max. Trades pro Handelstag</label><output id="tpd-o"></output></div><input type="range" id="tpd" min="1" max="10" step="1"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Tagesregeln</legend>
+        <div class="ctl"><div class="row"><label for="dll">Daily Loss Limit (0 = keins)</label><output id="dll-o"></output></div><input type="range" id="dll" min="0" max="5000" step="50"></div>
+        <label class="check"><input type="checkbox" id="dllhard"> Hart: Verstoß beendet den Account (sonst nur den Tag)</label>
+        <div class="ctl" id="w-cons"><div class="row"><label for="cons">Consistency Challenge: Best Day ≤ (0 = keine)</label><output id="cons-o"></output></div><input type="range" id="cons" min="0" max="100" step="5"></div>
+        <div class="ctl"><div class="row"><label for="consF">Consistency Funded: Best Day ≤ (0 = keine)</label><output id="consF-o"></output></div><input type="range" id="consF" min="0" max="100" step="5"><small>Anteil des Gewinns der Phase bzw. des Auszahlungszyklus. Ist der beste Tag zu groß, wird weitergehandelt, bis der Gewinn reicht.</small></div>
       </fieldset>
 
       <fieldset class="hedge-legend">
@@ -125,7 +134,7 @@
         <p class="note">Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
       </div>
 
-      <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft, Consistency-Regeln, die 15 %-Best-Day-Regel von Alpha Direct und Slippage sind nicht abgebildet. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
+      <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown und Daily Loss werden auf geschlossenen Trades geprüft (ein Verlust-Trade kann das Limit überschreiten), Gewinntage-Pflichten, Monatsgebühren und Slippage sind nicht abgebildet. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
     </div>
   </div>
 </div>
