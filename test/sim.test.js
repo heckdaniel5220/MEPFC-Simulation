@@ -130,11 +130,10 @@ test('Lucid: Direct ist Instant, alle anderen 1-Step-Challenge', () => {
 // ---- MyFundedFutures-Katalog (M-010c) ----
 const MF = OFFERS.find(gr => gr.g.startsWith('MyFundedFutures')).items;
 
-test('MFFU hat 11 Einträge, insgesamt 56 Angebote (48 − 3 + 11)', () => {
+test('MFFU hat 11 Einträge', () => {
   assert.strictEqual(MF.length, 11);
   assert.deepStrictEqual(MF.map(o => o.id), ['mf-rapid-25', 'mf-rapid-50', 'mf-rapid-100', 'mf-rapid-150', 'mf-pro-50', 'mf-pro-100', 'mf-pro-150',
     'mf-builder-25', 'mf-builder-50', 'mf-builder-100', 'mf-builder-150']);
-  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 56);
 });
 
 test('MFFU-Einträge haben Quelle, Stand, Rohregeln und Code CLUB', () => {
@@ -168,6 +167,49 @@ test('MFFU: alle 1-Step-Challenge mit trailing Drawdown', () => {
 
 test('MFFU-ids sind eindeutig', () => {
   assert.strictEqual(new Set(MF.map(o => o.id)).size, MF.length);
+});
+
+// ---- FundedNext-Futures-Katalog (M-010d) ----
+const FN = OFFERS.find(gr => gr.g.startsWith('FundedNext')).items;
+
+test('FundedNext hat 7 Einträge, insgesamt 57 Angebote (56 − 6 + 7)', () => {
+  assert.strictEqual(FN.length, 7);
+  assert.deepStrictEqual(FN.map(o => o.id), ['fn-flex-50', 'fn-flex-100', 'fn-flex-150', 'fn-rp-25', 'fn-rp-50', 'fn-rp-100', 'fn-direct-50']);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 57);
+});
+
+test('FundedNext-Einträge haben Quelle, Stand, Rohregeln und Code', () => {
+  for (const o of FN) {
+    assert.ok(typeof o.src === 'string' && o.src.startsWith('https://helpfutures.fundednext.com/'), o.id);
+    assert.strictEqual(o.asof, '2026-10-15', o.id);
+    assert.ok(o.rules && typeof o.rules === 'object', o.id);
+    assert.ok(['FNFLEX', 'RAPID', 'FNDIRECT'].includes(o.code), o.id);
+  }
+});
+
+test('FundedNext-Kernfelder passen zu den Rohregeln', () => {
+  for (const o of FN) {
+    assert.strictEqual(o.fee, o.rules.codePrice, o.id + ' fee = Codepreis');
+    assert.ok(o.fee < o.rules.price, o.id + ' Code unter Liste');
+    assert.strictEqual(o.list, `${o.rules.price} $ einmalig`, o.id + ' list');
+    assert.strictEqual(o.dd, o.rules.mll, o.id + ' dd');
+    assert.strictEqual(o.cap, o.rules.payoutCap, o.id + ' cap');
+    assert.strictEqual(o.split, o.id.startsWith('fn-flex-') ? 95 : 90, o.id + ' split');
+    assert.ok(!o.ddStatic, o.id + ' trailing');
+  }
+});
+
+test('FundedNext: Direct instant mit Ziel 0, sonst 1-Step-Challenge', () => {
+  for (const o of FN) {
+    if (o.id === 'fn-direct-50') { assert.strictEqual(o.mode, 'instant'); assert.strictEqual(o.target, 0); }
+    else { assert.strictEqual(o.mode, 'challenge', o.id); assert.strictEqual(o.target2, 0, o.id); }
+  }
+});
+
+test('alle ids eindeutig, keine FundedNext-Legacy-ids mehr', () => {
+  const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
+  assert.strictEqual(new Set(ids).size, ids.length);
+  assert.ok(!ids.some(id => id.startsWith('fn-legacy-')), 'Legacy vorhanden');
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
