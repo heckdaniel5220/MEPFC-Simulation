@@ -125,14 +125,67 @@
       target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:k.cap,split:90,maxp:5,
       src:LU_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
   };
+  // ---- MyFundedFutures: Regeln aus help.myfundedfutures.com (Artikel Juli–Okt. 2026), Preise myfundedfutures.com (Screenshots 15.10.2026) ----
+  // fee = CLUB-Preis (−40 %, rules.codePrice), rules.price = Listenpreis. Builder 50k = Variante Add-On. Abbildung: siehe CLAUDE.md.
+  const MF_SRC={
+    rapid:{25:'https://help.myfundedfutures.com/en/articles/14116402-rapid-plan-25k-a-comprehensive-look',
+      50:'https://help.myfundedfutures.com/en/articles/13134709-rapid-plan-50k-a-comprehensive-look',
+      100:'https://help.myfundedfutures.com/en/articles/13286542-rapid-plan-100k-a-comprehensive-look',
+      150:'https://help.myfundedfutures.com/en/articles/13286582-rapid-plan-150k-a-comprehensive-look'},
+    pro:{50:'https://help.myfundedfutures.com/en/articles/17573707-comprehensive-look-into-redesigned-pro-plan',
+      100:'https://help.myfundedfutures.com/en/articles/17573707-comprehensive-look-into-redesigned-pro-plan',
+      150:'https://help.myfundedfutures.com/en/articles/17573707-comprehensive-look-into-redesigned-pro-plan'},
+    builder:{25:'https://help.myfundedfutures.com/en/articles/17036130-builder-plan-25k-a-comprehensive-look',
+      50:'https://help.myfundedfutures.com/en/articles/14290805-builder-plan-50k-a-comprehensive-guide',
+      100:'https://help.myfundedfutures.com/en/articles/17005296-builder-plan-100k-comprehensive-guide',
+      150:'https://help.myfundedfutures.com/en/articles/17035331-builder-plan-150k-comprehensive-guide'}};
+  // Plan, Größe, Liste, CLUB, Ziel, MLL, Mini, Micro, min. Tage Eval, Consistency Eval/Funded %, Builder: DLL, Zyklus/Mindestauszahlung, Cap
+  const MF_ROWS=[
+    ['rapid',25,145,87,1500,1000,3,30,2,50,null],
+    ['rapid',50,209,125,3000,2000,5,50,2,50,null],
+    ['rapid',100,356,214,6000,3000,8,80,2,50,null],
+    ['rapid',150,463,278,9000,4500,10,100,2,50,null],
+    ['pro',50,265,159,3000,2000,3,30,2,50,null],
+    ['pro',100,401,241,6000,3000,6,60,2,50,null],
+    ['pro',150,557,334,9000,4500,9,90,2,50,null],
+    ['builder',25,105,63,1500,1000,2,20,1,null,50,{dll:600,cycle:250,cap:1000}],
+    ['builder',50,125,75,3000,1500,4,40,1,null,50,{dll:1000,cycle:500,cap:2000}],
+    ['builder',100,282,169,6000,3000,6,60,1,null,50,{dll:1750,cycle:1000,cap:3000}],
+    ['builder',150,398,239,9000,4500,9,90,1,null,50,{dll:2500,cycle:1500,cap:4500}]
+  ];
+  const MF = ([plan,size,price,codePrice,goal,mll,maxMini,maxMicro,minDaysEval,consEval,consFunded,x])=>{
+    const NAME={rapid:'Rapid',pro:'Pro',builder:'Builder'}, fmt=v=>v.toLocaleString('de-DE'), addOn=plan==='builder'&&size===50;
+    const EOD='eod-trailing-lock-start100', INTRA='intraday-trailing-lock-start100';
+    const r={price,codePrice,codeMaxUses:2,target:goal,mll,mllTypeEval:EOD,mllTypeFunded:plan==='rapid'?INTRA:EOD,mllStaticAfterFirstPayout:plan==='pro',
+      dlgEval:null,dlgFunded:null,dlgType:null,consEval,consFunded,minDaysEval,payoutMin:null,payoutCap:null,totalPayoutCap:null,cycleProfitMin:null,
+      minDaysCycle:null,firstPayoutAfterHours:null,maxPayouts:null,liveAtDailyProfit:null,maxMini,maxMicro,newsFunded:null,billing:'once',variant:addOn?'Add-On':null};
+    let k, regeln;
+    if(plan==='rapid'){
+      Object.assign(r,{payoutMin:500,firstPayoutAfterHours:24,liveAtDailyProfit:10000,newsFunded:'T1 verboten'});
+      k={minp:500,cap:10000,maxp:5,split:90};
+      regeln=`Eval-Consistency 50 %, min. 2 Tage. Eval EOD-trailing, Funded intraday-trailing. Kein DLL. Puffer ${fmt(mll+100)} $ (MLL + 100), Auszahlung täglich ab 500 $, erste 24 h nach dem ersten Trade, kein Cap pro Auszahlung. Ab 10.000 $ Tagesgewinn automatisch live, Gewinn darüber verfällt, bis 5.000 $ gehen in die Reserve. T1-News im Funded verboten.`;
+    } else if(plan==='pro'){
+      Object.assign(r,{payoutMin:1000,totalPayoutCap:100000,firstPayoutAfterHours:336,maxPayouts:3,newsFunded:'T1 verboten'});
+      k={minp:1000,cap:100000,maxp:3,split:80};
+      regeln=`Eval-Consistency 50 %, min. 2 Tage. Eval und Funded EOD-trailing, nach der 1. Auszahlung MLL statisch bei Start + 100 $. Kein DLL. Puffer ${fmt(mll+100)} $ (MLL + 100), Auszahlung ab 1.000 $, erste frühestens 14 Kalendertage nach dem ersten Trade, kein Cap pro Auszahlung, Gesamtcap 100.000 $ pro Nutzer. Live-Prüfung nach 3 Auszahlungen in Folge oder bei 20.000 $ Gewinn. T1-News im Funded verboten.`;
+    } else {
+      Object.assign(r,{dlgEval:x.dll,dlgFunded:x.dll,dlgType:'soft',payoutMin:x.cycle,payoutCap:x.cap,cycleProfitMin:x.cycle,minDaysCycle:2,firstPayoutAfterHours:48,maxPayouts:5,newsFunded:'T1 erlaubt'});
+      k={minp:x.cycle,cap:x.cap,maxp:5,split:80};
+      regeln=`Funded-Consistency 50 %, min. 1 Tag Eval. Eval und Funded EOD-trailing. DLL ${fmt(x.dll)} $ (soft, Eval und Funded). Puffer ${fmt(mll+100)} $ (MLL + 100), Zyklusgewinn und Mindestauszahlung ${fmt(x.cycle)} $, min. 2 Handelstage pro Zyklus, Cap ${fmt(x.cap)} $ pro Zyklus, erste Auszahlung 48 h nach dem ersten Trade, max. 5 Auszahlungen, dann live. T1-News erlaubt.${addOn?' Variante Add-On (strengere MLL, Preise aus dem Help Center); Default: MLL 2.000 $, Liste 153 $, CLUB 92 $.':''}`;
+    }
+    const allg=`Max. ${maxMini} Mini/${maxMicro} Micro, keine Overnight-Positionen, Funded startet bei 0 $. Einmalzahlung, keine Aktivierungsgebühr. CLUB-Preis ${fmt(codePrice)} $, CLUB max. 2 Einlösungen.`;
+    const annahmen=['Annahmen: Lock bei Start + 100, Kern lockt bei Start (100 $ milder).'];
+    if(plan==='rapid') annahmen.push('Eval EOD-trailing, Kern pro Trade (strenger). cap 10.000 $ = Tagesgewinn bis Live (Proxy, es gibt keinen Cap). maxp 5: Konvention. Reserve nicht abgebildet.');
+    if(plan==='pro') annahmen.push('EOD-trailing, Kern pro Trade (strenger). Statisches MLL nach der 1. Auszahlung nicht im Kern. cap 100.000 $ = Gesamtcap als Proxy. maxp 3 = Live-Prüfung nach 3 Auszahlungen (konservativ).');
+    if(plan==='builder') annahmen.push('EOD-trailing, Kern pro Trade (strenger). DLL, Consistency und Handelstage nicht im Kern.');
+    return {id:`mf-${plan}-${size}`,n:`${NAME[plan]} ${size}k${addOn?' Add-On':''}`,mode:'challenge',fee:codePrice,list:`${price} $ einmalig`,code:'CLUB',
+      target:goal,target2:0,dd:mll,buf:mll+100,minp:k.minp,wfrac:100,cap:k.cap,split:k.split,maxp:k.maxp,
+      src:MF_SRC[plan][size],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
+  };
   const OFFERS=[
     {g:'Alpha Futures · CME-Futures · Eval monatlich, Direct einmalig', items:AF_ROWS.map(AF)},
     {g:'Lucid Trading · Futures · einmalig', items:LU_ROWS.map(LU)},
-    {g:'MyFundedFutures · NQ-Futures · monatlich', items:[
-      {id:'mf-rapid-50',n:'Rapid 50k',mode:'challenge',fee:79,list:'157 $/Monat',code:'50 % (Juni 2026)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:100000,split:90,maxp:5,note:'Eval-Consistency 50 %. Funded Drawdown intraday, Puffer 2.100 $, Auszahlung täglich.'},
-      {id:'mf-builder-50',n:'Builder 50k',mode:'challenge',fee:77,list:'153 $/Monat',code:'50 % (Juni 2026)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:2000,split:80,maxp:5,note:'Funded-Consistency 50 %, Daily Loss 1.000 $ (soft), Auszahlung alle 48 h.'},
-      {id:'mf-pro-50',n:'Pro 50k',mode:'challenge',fee:114,list:'227 $/Monat',code:'50 % (Juni 2026)',target:3000,dd:2000,buf:2100,minp:500,wfrac:100,cap:100000,split:80,maxp:5,note:'Eval-Consistency 50 %. Auszahlung alle 14 Tage, kein Deckel pro Auszahlung.'}
-    ]},
+    {g:'MyFundedFutures · Futures · einmalig', items:MF_ROWS.map(MF)},
     {g:'FundedNext Futures · einmalig', items:[
       {id:'fn-rd-50',n:'Rapid Daily 50k',mode:'challenge',fee:159,list:'299,98 $',code:'Rabatt (Partner)',target:3000,dd:2000,buf:0,minp:500,wfrac:100,cap:1200,split:90,maxp:5,note:'Keine Consistency. Daily Loss 1.000 $ (soft). Auszahlung täglich, max. 1.200 $ pro Zyklus. Bots erlaubt.'},
       {id:'fn-rp-50',n:'Rapid Pro 50k',mode:'challenge',fee:159,list:'299,98 $',code:'Rabatt (Partner)',target:3000,dd:2000,buf:0,minp:500,wfrac:100,cap:1200,split:90,maxp:5,note:'Funded-Consistency 40 %. Auszahlung alle 3 Tage, max. 1.200 $. Bots erlaubt.'},
