@@ -42,15 +42,15 @@
     const rules={price,reset,target:direct?null:goal,mll,mllType:'eod-trailing-lock-start',dlgEval,dlgFunded,dlgType:'soft',consEval,consFunded,
       payoutMin,payoutMax,payoutFrac:direct?null:0.5,winDays:direct?null:5,winDayMin:direct?null:200,maxReqPerMonth:direct?null:4,
       wTarget1:direct?goal[0]:null,wTarget2:direct?goal[1]:null,maxMini,maxMicro,scaling,newsFunded,flatBy:'16:20 ET',billing:direct?'once':'monthly'};
-    // minp: Eval = max(2 × Mindestauszahlung; 5 Gewinntage × 200 $), Direct = 1. Auszahlungsziel für alle Zyklen
-    const minp=direct?goal[0]:Math.max(2*payoutMin,5*200);
+    // minp: Eval = Mindestauszahlung ÷ 50 % (Gewinntage seit M-004 im Kern), Direct = 1. Auszahlungsziel für alle Zyklen
+    const minp=direct?goal[0]:payoutMin/0.5;
     const fmt=v=>v.toLocaleString('de-DE');
     const regeln=[
       `DLG ${dlgEval==null&&dlgFunded==null?'keiner':(direct?fmt(dlgFunded)+' $':`Eval ${dlgEval==null?'–':fmt(dlgEval)+' $'}, Funded ${dlgFunded==null?'–':fmt(dlgFunded)+' $'}`)+' (soft)'}`,
       `Consistency ${direct?consFunded+' %':`Eval ${consEval==null?'–':consEval+' %'}, Funded ${consFunded==null?'–':consFunded+' %'}`}`,
       direct?`Auszahlungsziel ${fmt(goal[0])} $, ab 2. Antrag ${fmt(goal[1])} $, je Zyklus neu`:`Auszahlung nach 5 Gewinntagen ≥ 200 $, max. 50 % des Gewinns, max. 4 Anträge/Monat`,
       `Auszahlung ${fmt(payoutMin)}–${fmt(payoutMax)} $, max. ${maxMini} Mini/${maxMicro} Micro, Scaling ${scaling?'ja':'nein'}, News Funded ${newsFunded}, flat bis 16:20 ET`].join('. ')+'.';
-    const annahmen=`Annahmen: MLL EOD-trailing, Kern pro Trade (konservativ). Consistency im Kern seit M-003 (strikt <, Funded je Zyklus). minp ${fmt(minp)} $ ${direct?'= 1. Auszahlungsziel für alle Zyklen':'nähert Gewinntage und Mindestauszahlung an'}. wfrac 50 %${direct?' ohne offizielle Angabe (konservativ)':''}. Fee = Listenpreis, kein belegter Rabattcode.`;
+    const annahmen=`Annahmen: MLL EOD-trailing, Kern pro Trade (konservativ). Consistency im Kern seit M-003 (strikt <, Funded je Zyklus). minp ${fmt(minp)} $ ${direct?'= 1. Auszahlungsziel für alle Zyklen':'= Mindestauszahlung ÷ 50 % (5 Gewinntage ≥ 200 $ je Zyklus im Kern seit M-004)'}. wfrac 50 %${direct?' ohne offizielle Angabe (konservativ)':''}. Fee = Listenpreis, kein belegter Rabattcode.`;
     return {id,n,mode:direct?'instant':'challenge',fee:price,list:direct?`${price} $ einmalig`:`${price} $/Monat`,code:'–',
       target:direct?0:goal,target2:0,dd:mll,buf:0,minp,wfrac:50,cap:payoutMax,split:90,maxp:5,
       src:AF_SRC[plan],asof:'2026-10-15',rules,note:regeln+' '+annahmen};
@@ -97,7 +97,7 @@
     let k, regeln;
     if(plan==='flex'){
       Object.assign(r,{consEval:50,payoutCap1:x.cap,payoutCap2:x.cap,payoutFrac:0.5,winDays:5,winDayMin:x.winDayMin,maxPayouts:5,config:'DLL an'});
-      k={buf:100,wfrac:50,cap:x.cap,minp:Math.max(2*500,5*x.winDayMin)};
+      k={buf:100,wfrac:50,cap:x.cap,minp:500/0.5};
       regeln=`Eval-Consistency 50 %. Auszahlung nach 5 Tagen ≥ ${fmt(x.winDayMin)} $ je Zyklus, Netto-Zyklusgewinn > 0, max. 50 % des Gewinns, Cap ${fmt(x.cap)} $ (fest), max. 5 Auszahlungen, dann live. Nach jeder Auszahlung springt das MLL auf Start + 100 $.`;
     } else if(plan==='pro'){
       Object.assign(r,{dlgScaleFunded:0.6,consFunded:40,payoutCap1:x.cap1,payoutCap2:x.cap2,cycleTarget1:x.cycle,cycleTarget2:x.cycle,bufferMll100:true,config:'DLL an'});
@@ -115,10 +115,10 @@
     const allg=`${direct?'':`DLL ${fmt(dlgEval)} $ Eval / ${fmt(dlgFunded)} $ Funded (soft). `}Max. ${r.maxMini} Mini/${r.maxMicro} Micro. VAULT-Preis ${eur(codePrice)} $${reset!=null?`, Reset ${fmt(reset)} $`:''}${x.promo?`; Aktionspreis „Limited time“ ${eur(x.promo)} $ ohne Enddatum`:''}.`;
     const annahmen=[`Annahmen: Lock bei Start+100, Kern lockt bei Start (100 $ milder).`];
     if(plan!=='daily') annahmen.push('EOD-trailing, Kern pro Trade (strenger).');
-    if(plan==='flex') annahmen.push(`minp ${fmt(k.minp)} $ = max(2 × 500 $; 5 × ${fmt(x.winDayMin)} $).`);
+    if(plan==='flex') annahmen.push(`minp ${fmt(k.minp)} $ = Mindestauszahlung 500 $ ÷ 50 %; 5 Gewinntage ≥ ${fmt(x.winDayMin)} $ je Zyklus im Kern seit M-004.`);
     if(plan==='pro') annahmen.push(`cap = Cap der 1. Auszahlung (konservativ). maxp 5: Quelle nennt kein Maximum, Konvention.`);
     if(plan==='daily') annahmen.push(`cap ${fmt(x.live)} $ = Tagesgewinn bis Live (Proxy, es gibt keinen Cap). maxp 5: Konvention.`);
-    if(direct) annahmen.push(`minp = 1. Zyklusziel und cap = Cap Auszahlung 1–3 für alle Zyklen (konservativ).`);
+    if(direct) annahmen.push(`minp = 1. Zyklusziel und cap = Cap Auszahlung 1–3 für alle Zyklen (konservativ). 5 Tage bis zur Auszahlung im Kern als 5 Handelstage je Zyklus (M-004): Handelstage laut Zweitquelle, Primärquelle offen.`);
     return {id:`lu-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code:'VAULT',
       target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:k.cap,split:90,maxp:5,
       src:LU_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
@@ -175,7 +175,7 @@
     const annahmen=['Annahmen: Lock bei Start + 100, Kern lockt bei Start (100 $ milder).'];
     if(plan==='rapid') annahmen.push('Eval EOD-trailing, Kern pro Trade (strenger). cap 10.000 $ = Tagesgewinn bis Live (Proxy, es gibt keinen Cap). maxp 5: Konvention. Reserve nicht abgebildet.');
     if(plan==='pro') annahmen.push('EOD-trailing, Kern pro Trade (strenger). Statisches MLL nach der 1. Auszahlung nicht im Kern. cap 100.000 $ = Gesamtcap als Proxy. maxp 3 = Live-Prüfung nach 3 Auszahlungen (konservativ).');
-    if(plan==='builder') annahmen.push('EOD-trailing, Kern pro Trade (strenger). DLL (M-002) und Funded-Consistency (M-003, je Zyklus) im Kern, Mindest-Handelstage pro Zyklus nicht.');
+    if(plan==='builder') annahmen.push('EOD-trailing, Kern pro Trade (strenger). DLL (M-002), Funded-Consistency (M-003, je Zyklus) und Mindest-Handelstage (M-004, Eval und je Zyklus) im Kern.');
     return {id:`mf-${plan}-${size}`,n:`${NAME[plan]} ${size}k${addOn?' Add-On':''}`,mode:'challenge',fee:codePrice,list:`${price} $ einmalig`,code:'CLUB',
       target:goal,target2:0,dd:mll,buf:mll+100,minp:k.minp,wfrac:100,cap:k.cap,split:k.split,maxp:k.maxp,
       src:MF_SRC[plan][size],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
@@ -213,7 +213,7 @@
     let k, regeln;
     if(plan==='flex'){
       Object.assign(r,{mllFixedAfterFirstPayout:true,consEval:40,consEvalMode:'target',benchmarkDays:5,benchmarkMin:x.bench,cycleProfitMin:500,payoutMin:250,payoutFrac:0.5});
-      k={buf:100,wfrac:50,minp:Math.max(500,5*x.bench,2*250),split:95};
+      k={buf:100,wfrac:50,minp:Math.max(500,250/0.5),split:95};
       regeln=`Eval-Consistency: bester Tag ≤ 40 % des Profit-Ziels, sonst steigt das Ziel auf bester Tag ÷ 0,4. Funded ohne Consistency. Kein DLL. Auszahlung nach 5 Benchmark-Tagen ≥ ${fmt(x.bench)} $ je Zyklus, Zyklusgewinn ≥ 500 $, min. 250 $, max. 50 % des Gewinns, Cap ${fmt(x.cap)} $. Die 1. Auszahlung setzt das MLL fest auf Start + 100 $. Nach 5 Auszahlungen beendet. Codepreis ab dem 3. Account ${eur(codeNext)} $.${size===100?' Kachel 144,99 $, Checkout 145,13 $; es gilt 145,13 $ (konservativ).':''}`;
     } else if(plan==='rp'){
       Object.assign(r,{consFunded:40,consFundedMode:'cycle',cycleProfitMin:500,payoutMin:250,payoutEveryDays:3});
@@ -230,7 +230,7 @@
     }
     const allg=`MLL EOD-trailing, Bruch intraday auf Equity. Max. ${maxMini} Mini/${maxMicro} Micro (1:10). Einmalgebühr, keine Aktivierungsgebühr. ${CODE[plan]}-Preis ${eur(codePrice)} $${reset!=null?`, Reset ${eur(reset)} $`:''}.`;
     const annahmen=['Annahmen: EOD-trailing, Kern pro Trade (strenger); Lock bei Start + 100, Kern bei Start (100 $ milder).'];
-    if(plan==='flex') annahmen.push(`Eval-Consistency gegen Profit-Ziel: im Kern als bester Tag < 40 % des Phasengewinns (gleiche Bedingung, strikt < statt ≤). buf 100 = MLL fest bei Start + 100 nach der 1. Auszahlung. minp ${fmt(k.minp)} $ = max(500 $; 5 × ${fmt(x.bench)} $; 2 × 250 $).`);
+    if(plan==='flex') annahmen.push(`Eval-Consistency gegen Profit-Ziel: im Kern als bester Tag < 40 % des Phasengewinns (gleiche Bedingung, strikt < statt ≤). buf 100 = MLL fest bei Start + 100 nach der 1. Auszahlung. minp ${fmt(k.minp)} $ = max(Zyklusgewinn 500 $; 250 $ ÷ 50 %); 5 Benchmark-Tage ≥ ${fmt(x.bench)} $ je Zyklus im Kern seit M-004 (je Zyklus konservativ angenommen).`);
     if(plan==='rd') annahmen.push('DLL im Kern seit M-002.');
     if(plan==='rp') annahmen.push('buf 100 (konservativ: nach dem Lock muss das Konto über Start + 100 bleiben). Funded-Consistency im Kern seit M-003 (je Zyklus).');
     if(direct) annahmen.push('DLL (M-002) und Consistency perpetual (M-003) im Kern, Wochen-Trade nicht.');
@@ -286,7 +286,7 @@
       regeln=`Ziel je Phase 6 % (${fmt(goal1)} $), min. 3 Tage je Phase. Max. DD 6 % statisch, Tages-DD 3 % (${fmt(dailyDd)} $). Preis = On-Demand; Bi-Weekly ${fmt(biWeekly)} $, 90 %-Add-On ${fmt(ninety)} $ (nur Notiz). Auszahlung on demand: bester Tag ≤ 40 %, min. 2 % brutto. Kein Wochenend-Halten im Qualified.`;
     }
     const allg=`${direct?'':`Max. ${maxRiskPct} % offenes Risiko pro Asset (Hard Breach, nur Qualified, Käufe ab 21.07.2026). `}Tages-DD gemessen am höheren Wert aus EOD-Balance und Equity. News-Sperre ±5 Min. auf dem betroffenen Instrument. Lot-Limit ${fmt(lotLimit)}. Einmalgebühr, Liste ${fmt(price)} $, ${code}-Preis ${eur(codePrice)} $. Code bis 31.10.2026; danach Listenpreis (Abgleich). Gegentrades verboten.`;
-    const annahmen=`Annahmen: Tages-DD im Kern als hartes DLL (M-002), Best-Day-Regel als Funded-Consistency je Zyklus (M-003, strikt < statt ≤). cap 100.000 $ = kein Cap. maxp 5 Konvention.${direct?' buf 3 %, minp 1 % der Kontogröße.':' minp = 2 % der Kontogröße.'}`;
+    const annahmen=`Annahmen: Tages-DD im Kern als hartes DLL (M-002), Best-Day-Regel als Funded-Consistency je Zyklus (M-003, strikt < statt ≤). cap 100.000 $ = kein Cap. maxp 5 Konvention.${direct?' buf 3 %, minp 1 % der Kontogröße. 7 Gewinntage im Kern (M-004) je Zyklus mit Tages-P&L > 0 (Quelle nennt keine Schwelle, je Zyklus konservativ).':` minp = 2 % der Kontogröße. Mindesttage im Kern (M-004) als ${pro?3:1} Handelstag${pro?'e':''} je Phase.`}`;
     return {id:`ac-${plan}-${size===2500?'2.5':k}`,n,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code,
       maxRisk:size*maxRiskPct/100,target:direct?0:goal1,target2:pro?goal2:0,dd:mll,...(pro?{ddStatic:true}:{}),
       buf:direct?size*0.03:0,minp:size*(direct?0.01:0.02),wfrac:100,cap:100000,split:direct?90:80,maxp:5,
@@ -337,7 +337,7 @@
     ['2step-nano',100000,239,155,8000,5000,3000,10000],
     ['2step-nano',200000,460,299,16000,10000,6000,20000]
   ];
-  // Je Plan: Name, nominaler Split, statischer DD, Consistency Eval/Funded, Mindest-Gewinntage Eval/Funded (≥ 0,5 %), Auszahlungsrhythmus (Tage, 0 = on demand)
+  // Je Plan: Name, nominaler Split, statischer DD, Consistency Eval/Funded, Mindest-Gewinntage Eval (je Phase)/Funded (≥ 0,5 %), Auszahlungsrhythmus (Tage, 0 = on demand)
   const BG_CFD_PLAN={
     instant:{n:'Instant',split:80,stat:false,consEval:null,consFunded:20,minDaysEval:null,minProfitDays:5,every:0},
     '1step':{n:'1 Step',split:85,stat:false,consEval:null,consFunded:null,minDaysEval:3,minProfitDays:null,every:14},
@@ -351,11 +351,11 @@
     const firstCap=instant&&size>=200000;
     const r={size,price,codePrice,codeValidUntil:null,target1:goal1,target2:goal2,mll,mllType:p.stat?'static':'trailing-hwm-close-lock-start',
       bufferPct:p.stat?null:1,dailyDd,dailyDdBase:'max(balance,equity) 17:00 EST',consEval:p.consEval,consFunded,
-      minDaysEval:p.minDaysEval,minProfitDays:p.minProfitDays,minProfitDayPct:p.minDaysEval||p.minProfitDays?0.5:null,
+      minProfitDaysEval:p.minDaysEval,minProfitDays:p.minProfitDays,minProfitDayPct:p.minDaysEval||p.minProfitDays?0.5:null,payoutMin:100,
       payoutEveryDays:p.every,payoutFeePct:3,splitNominal:p.split,payoutCapPct:nano2?2:null,
       guardianShieldPct:shield,guardianShieldNano:plan.endsWith('nano')?'nicht genannt, konservativ 2 %':null,
       firstPayoutsCap:firstCap?{amount:10000,count:2}:null,leverage:null,newsFunded:false,billing:'once'};
-    const minp=instant||plan==='1step-nano'?Math.max(100,5*0.005*size):100;
+    const minp=100;
     const cap=nano2?size*0.02:(firstCap?10000:100000);
     const ziel=instant?'Ohne Challenge':(goal2?`Ziel ${bgFmt(goal1)} $ / ${bgFmt(goal2)} $`:`Ziel ${bgFmt(goal1)} $`);
     const regeln=[`${ziel}. Max. DD ${bgFmt(mll)} $ ${p.stat?'statisch':'trailing (höchster Schlusskontostand), lockt bei Start, sobald Gewinn = DD; danach 1 % der Größe als Puffer'}. Tages-DD ${bgFmt(dailyDd)} $ (hart, Basis höherer Wert aus Balance und Equity um 17:00 EST)`,
@@ -366,7 +366,7 @@
       `Guardian Shield (nur Funded): ${shield} % offener Verlust schließt alle Trades, 1. Mal Split 50 %, 2. Mal Account weg${plan.endsWith('nano')?' (bei Nano nicht genannt, konservativ 2 %)':''}`,
       `Einmalgebühr, Liste ${bgFmt(price)} $, Website-Preis ${bgFmt(codePrice)} $ (HALLOWEEN −35 %). Saisoncode ohne Ablaufdatum, Abgleich. Gegentrades verboten`
     ].filter(Boolean).join('. ')+'.';
-    const annahmen=`Annahmen: split ${bgFmt(split)} = ${p.split} % × 0,97 inkl. 3 % Auszahlungsgebühr. Guardian Shield als maxRisk ${shield} % (${bgFmt(size*shield/100)} $; die App deckelt das Risiko auch in der Challenge). Tages-DD im Kern als hartes DLL (M-002)${consFunded||p.consEval?', Consistency je Zyklus (M-003, strikt <)':''}. ${p.stat?'buf 0 (statisch).':'buf 1 % der Größe (Puffer nach Lock).'} minp ${bgFmt(minp)} $${minp>100?' = 5 Gewinntage × 0,5 %':''}. ${cap===100000?'cap 100.000 $ = kein Cap':`cap ${bgFmt(cap)} $${firstCap?' für alle Auszahlungen (konservativ)':''}`}. maxp 5 Konvention. Gewinntage-Pflicht und Auszahlungsrhythmus nicht im Kern.`;
+    const annahmen=`Annahmen: split ${bgFmt(split)} = ${p.split} % × 0,97 inkl. 3 % Auszahlungsgebühr. Guardian Shield als maxRisk ${shield} % (${bgFmt(size*shield/100)} $; die App deckelt das Risiko auch in der Challenge). Tages-DD im Kern als hartes DLL (M-002)${consFunded||p.consEval?', Consistency je Zyklus (M-003, strikt <)':''}. ${p.stat?'buf 0 (statisch).':'buf 1 % der Größe (Puffer nach Lock).'} minp ${bgFmt(minp)} $ = Mindestauszahlung. ${cap===100000?'cap 100.000 $ = kein Cap':`cap ${bgFmt(cap)} $${firstCap?' für alle Auszahlungen (konservativ)':''}`}. maxp 5 Konvention. Gewinntage ≥ 0,5 % (${bgFmt(size*0.005)} $) im Kern seit M-004${p.minProfitDays?' (Funded je Zyklus, konservativ)':''}${p.minDaysEval?' (Eval je Phase)':''}, Auszahlungsrhythmus nicht.`;
     return {id:`bg-cfd-${plan}-${k}`,n:`${p.n} ${bgFmt(k)}k`,mode:instant?'instant':'challenge',fee:codePrice,list:`${bgFmt(price)} $ einmalig`,code:'HALLOWEEN',
       maxRisk:size*shield/100,target:instant?0:goal1,target2:goal2||0,dd:mll,...(p.stat?{ddStatic:true}:{}),
       buf:p.stat?0:size*0.01,minp,wfrac:100,cap,split,maxp:5,
@@ -410,7 +410,7 @@
       riskOption:res?'DLL':null,consOption:exp?'40%':null,
       priceNoDll:res?x.noDll[0]:null,codePriceNoDll:res?x.noDll[1]:null,split:90,billing:'once'};
     const buf=std?mll+100:(exp?x.buffer:100);
-    const minp=std?100:(exp?x.min:(res?Math.max(100,5*x.winDayMin):goal[0]));
+    const minp=std?100:(exp?x.min:(res?100:goal[0]));
     const cap=std?x.cap1:(exp?x.perDay:(res?x.cap:100000));
     const dllTxt=dlgEval==null&&dlgFunded==null?'kein DLL':(direct?`DLL ${bgFmt(dlgFunded)} $`:`DLL Eval ${dlgEval==null?'–':bgFmt(dlgEval)+' $'}, Funded ${dlgFunded==null?'–':bgFmt(dlgFunded)+' $'}`)+(dlgEval!=null||dlgFunded!=null?' (soft, Pause bis zum nächsten Handelstag)':'');
     const ausz=std?`Auszahlung min. 100 $, Cap 1. ${bgFmt(x.cap1)} $, ab 2. ${bgFmt(x.cap2)} $, erste Auszahlung 3 Tage nach dem 1. Funded-Trade, Puffer ${bgFmt(mll+100)} $ (Sekundärquelle tradetanto.com)`
@@ -429,7 +429,7 @@
       direct?'Consistency steigt auf 25/30 %, Kern fest 20 %.':null,
       std?'buf = MLL + 100 $ aus Sekundärquelle (konservativ), cap = Cap der 1. Auszahlung.':null,
       exp?'cap = max. Auszahlung pro Tag, minp = Mindestauszahlung; tägliche Auszahlung nicht im Kern.':null,
-      res?`buf 100 (Lock nach Auszahlung), minp = 5 Gewinntage × ${bgFmt(x.winDayMin)} $; Gewinntage nicht im Kern.`:null,
+      res?`buf 100 (Lock nach Auszahlung), minp = Mindestauszahlung 100 $; 5 Gewinntage ≥ ${bgFmt(x.winDayMin)} $ je Zyklus im Kern seit M-004.`:null,
       direct?'buf 100, minp = 1. Auszahlungsziel für alle Zyklen, cap 100.000 $ = kein Cap.':null,
       'maxp 5 Konvention.'].filter(Boolean).join(' ');
     return {id:`bg-fut-${plan}-${k}`,n:`${BG_FUT_NAME[plan]} ${k}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${bgFmt(price)} $ einmalig`,code:'HALLOWEEN',
@@ -468,6 +468,21 @@
       consEval:r.consEval??0,
       consFunded:r.consFunded??r.bestDayPct??0,
       consFundedMode:r.consFundedMode==='perpetual-best-day'?'perpetual':'cycle'});
+  }
+
+  // ---- Tage-Regeln (M-004): Kernfelder aus rules ableiten ----
+  // Eval (je Step): Mindest-Handelstage minDaysEval (MFFU) bzw. minDays (Alpha Capital); Gewinntage minProfitDaysEval × minProfitDayPct (Blue Guardian CFD).
+  // Funded (je Zyklus): Gewinntage winDays/winDayMin, benchmarkDays/benchmarkMin bzw. minProfitDays × minProfitDayPct (Schwelle 0 = Tages-P&L > 0);
+  // Mindest-Handelstage minDaysCycle (MFFU Builder) bzw. minDaysPayout (Lucid Direct). Prozent-Schwellen in $ (rules.size). Instant ohne Eval-Regeln.
+  for(const gr of OFFERS) for(const o of gr.items){
+    const r=o.rules||{}, inst=o.mode==='instant', pct=v=>v==null?0:r.size*v/100;
+    Object.assign(o,{
+      evalMinDays:inst?0:(r.minDaysEval??r.minDays??0),
+      evalWinDays:inst?0:(r.minProfitDaysEval??0),
+      evalWinDayMin:inst||!r.minProfitDaysEval?0:pct(r.minProfitDayPct),
+      payMinDays:r.minDaysCycle??r.minDaysPayout??0,
+      payWinDays:r.winDays??r.benchmarkDays??r.minProfitDays??0,
+      payWinDayMin:r.winDayMin??r.benchmarkMin??(r.minProfitDays?pct(r.minProfitDayPct):0)});
   }
 
   const api={PRESETS,OFFERS};
