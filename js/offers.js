@@ -14,7 +14,7 @@
 
   // ---- Alle recherchierten Challenge-Angebote (Fee = Preis mit aktuellem Code) ----
   // ---- Alpha Futures: offizielle Regeln aus help.alpha-futures.com (Artikel Juli/Aug. 2026), Stand 15.10.2026 ----
-  // rules = Rohregeln (null = Regel gilt nicht), der Kern liest sie noch nicht. Abbildung auf Kernfelder: siehe CLAUDE.md.
+  // rules = Rohregeln (null = Regel gilt nicht), Kernfelder für DLL und Consistency leiten die Schleifen am Ende ab. Abbildung auf Kernfelder: siehe CLAUDE.md.
   const AF_SRC={
     zero:'https://help.alpha-futures.com/en/articles/11771813-zero-account-overview',
     std:'https://help.alpha-futures.com/en/articles/11632512-standard-account-overview',
@@ -50,7 +50,7 @@
       `Consistency ${direct?consFunded+' %':`Eval ${consEval==null?'–':consEval+' %'}, Funded ${consFunded==null?'–':consFunded+' %'}`}`,
       direct?`Auszahlungsziel ${fmt(goal[0])} $, ab 2. Antrag ${fmt(goal[1])} $, je Zyklus neu`:`Auszahlung nach 5 Gewinntagen ≥ 200 $, max. 50 % des Gewinns, max. 4 Anträge/Monat`,
       `Auszahlung ${fmt(payoutMin)}–${fmt(payoutMax)} $, max. ${maxMini} Mini/${maxMicro} Micro, Scaling ${scaling?'ja':'nein'}, News Funded ${newsFunded}, flat bis 16:20 ET`].join('. ')+'.';
-    const annahmen=`Annahmen: MLL EOD-trailing, Kern pro Trade (konservativ bis M-001/M-002). minp ${fmt(minp)} $ ${direct?'= 1. Auszahlungsziel für alle Zyklen':'nähert Gewinntage und Mindestauszahlung an'}. wfrac 50 %${direct?' ohne offizielle Angabe (konservativ)':''}. Fee = Listenpreis, kein belegter Rabattcode.`;
+    const annahmen=`Annahmen: MLL EOD-trailing, Kern pro Trade (konservativ). Consistency im Kern seit M-003 (strikt <, Funded je Zyklus). minp ${fmt(minp)} $ ${direct?'= 1. Auszahlungsziel für alle Zyklen':'nähert Gewinntage und Mindestauszahlung an'}. wfrac 50 %${direct?' ohne offizielle Angabe (konservativ)':''}. Fee = Listenpreis, kein belegter Rabattcode.`;
     return {id,n,mode:direct?'instant':'challenge',fee:price,list:direct?`${price} $ einmalig`:`${price} $/Monat`,code:'–',
       target:direct?0:goal,target2:0,dd:mll,buf:0,minp,wfrac:50,cap:payoutMax,split:90,maxp:5,
       src:AF_SRC[plan],asof:'2026-10-15',rules,note:regeln+' '+annahmen};
@@ -175,7 +175,7 @@
     const annahmen=['Annahmen: Lock bei Start + 100, Kern lockt bei Start (100 $ milder).'];
     if(plan==='rapid') annahmen.push('Eval EOD-trailing, Kern pro Trade (strenger). cap 10.000 $ = Tagesgewinn bis Live (Proxy, es gibt keinen Cap). maxp 5: Konvention. Reserve nicht abgebildet.');
     if(plan==='pro') annahmen.push('EOD-trailing, Kern pro Trade (strenger). Statisches MLL nach der 1. Auszahlung nicht im Kern. cap 100.000 $ = Gesamtcap als Proxy. maxp 3 = Live-Prüfung nach 3 Auszahlungen (konservativ).');
-    if(plan==='builder') annahmen.push('EOD-trailing, Kern pro Trade (strenger). DLL, Consistency und Handelstage nicht im Kern.');
+    if(plan==='builder') annahmen.push('EOD-trailing, Kern pro Trade (strenger). DLL (M-002) und Funded-Consistency (M-003, je Zyklus) im Kern, Mindest-Handelstage pro Zyklus nicht.');
     return {id:`mf-${plan}-${size}`,n:`${NAME[plan]} ${size}k${addOn?' Add-On':''}`,mode:'challenge',fee:codePrice,list:`${price} $ einmalig`,code:'CLUB',
       target:goal,target2:0,dd:mll,buf:mll+100,minp:k.minp,wfrac:100,cap:k.cap,split:k.split,maxp:k.maxp,
       src:MF_SRC[plan][size],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
@@ -230,10 +230,10 @@
     }
     const allg=`MLL EOD-trailing, Bruch intraday auf Equity. Max. ${maxMini} Mini/${maxMicro} Micro (1:10). Einmalgebühr, keine Aktivierungsgebühr. ${CODE[plan]}-Preis ${eur(codePrice)} $${reset!=null?`, Reset ${eur(reset)} $`:''}.`;
     const annahmen=['Annahmen: EOD-trailing, Kern pro Trade (strenger); Lock bei Start + 100, Kern bei Start (100 $ milder).'];
-    if(plan==='flex') annahmen.push(`Eval-Consistency gegen Profit-Ziel, Kern ignoriert (bis M-003). buf 100 = MLL fest bei Start + 100 nach der 1. Auszahlung. minp ${fmt(k.minp)} $ = max(500 $; 5 × ${fmt(x.bench)} $; 2 × 250 $).`);
-    if(plan==='rd') annahmen.push('DLL noch nicht im Kern (M-002).');
-    if(plan==='rp') annahmen.push('buf 100 (konservativ: nach dem Lock muss das Konto über Start + 100 bleiben). Funded-Consistency nicht im Kern.');
-    if(direct) annahmen.push('DLL, Consistency und Wochen-Trade nicht im Kern.');
+    if(plan==='flex') annahmen.push(`Eval-Consistency gegen Profit-Ziel: im Kern als bester Tag < 40 % des Phasengewinns (gleiche Bedingung, strikt < statt ≤). buf 100 = MLL fest bei Start + 100 nach der 1. Auszahlung. minp ${fmt(k.minp)} $ = max(500 $; 5 × ${fmt(x.bench)} $; 2 × 250 $).`);
+    if(plan==='rd') annahmen.push('DLL im Kern seit M-002.');
+    if(plan==='rp') annahmen.push('buf 100 (konservativ: nach dem Lock muss das Konto über Start + 100 bleiben). Funded-Consistency im Kern seit M-003 (je Zyklus).');
+    if(direct) annahmen.push('DLL (M-002) und Consistency perpetual (M-003) im Kern, Wochen-Trade nicht.');
     return {id:`fn-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code:CODE[plan],
       target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:x.cap,split:k.split,maxp:5,
       src:FN_SRC[plan],asof:x.asof||'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
@@ -286,7 +286,7 @@
       regeln=`Ziel je Phase 6 % (${fmt(goal1)} $), min. 3 Tage je Phase. Max. DD 6 % statisch, Tages-DD 3 % (${fmt(dailyDd)} $). Preis = On-Demand; Bi-Weekly ${fmt(biWeekly)} $, 90 %-Add-On ${fmt(ninety)} $ (nur Notiz). Auszahlung on demand: bester Tag ≤ 40 %, min. 2 % brutto. Kein Wochenend-Halten im Qualified.`;
     }
     const allg=`${direct?'':`Max. ${maxRiskPct} % offenes Risiko pro Asset (Hard Breach, nur Qualified, Käufe ab 21.07.2026). `}Tages-DD gemessen am höheren Wert aus EOD-Balance und Equity. News-Sperre ±5 Min. auf dem betroffenen Instrument. Lot-Limit ${fmt(lotLimit)}. Einmalgebühr, Liste ${fmt(price)} $, ${code}-Preis ${eur(codePrice)} $. Code bis 31.10.2026; danach Listenpreis (Abgleich). Gegentrades verboten.`;
-    const annahmen=`Annahmen: Best-Day-Regel und Tages-DD noch nicht im Kern (M-002/M-003). cap 100.000 $ = kein Cap. maxp 5 Konvention.${direct?' buf 3 %, minp 1 % der Kontogröße.':' minp = 2 % der Kontogröße.'}`;
+    const annahmen=`Annahmen: Tages-DD im Kern als hartes DLL (M-002), Best-Day-Regel als Funded-Consistency je Zyklus (M-003, strikt < statt ≤). cap 100.000 $ = kein Cap. maxp 5 Konvention.${direct?' buf 3 %, minp 1 % der Kontogröße.':' minp = 2 % der Kontogröße.'}`;
     return {id:`ac-${plan}-${size===2500?'2.5':k}`,n,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code,
       maxRisk:size*maxRiskPct/100,target:direct?0:goal1,target2:pro?goal2:0,dd:mll,...(pro?{ddStatic:true}:{}),
       buf:direct?size*0.03:0,minp:size*(direct?0.01:0.02),wfrac:100,cap:100000,split:direct?90:80,maxp:5,
@@ -311,6 +311,17 @@
       dllType:r.dailyDd!=null?'hard':'soft',
       dllScaleFunded:scale,
       dllScaleFrom:scale>0?r.mll+100:0});
+  }
+
+  // ---- Consistency (M-003): Kernfelder aus rules ableiten ----
+  // consEval/consFunded (Futures) bzw. bestDayPct (Alpha Capital, nur Funded). FundedNext Flex 'target' ist dieselbe Bedingung.
+  // 'perpetual-best-day' (FundedNext Direct) → 'perpetual', sonst 'cycle'. consCompliant bleibt Default (true).
+  for(const gr of OFFERS) for(const o of gr.items){
+    const r=o.rules||{};
+    Object.assign(o,{
+      consEval:r.consEval??0,
+      consFunded:r.consFunded??r.bestDayPct??0,
+      consFundedMode:r.consFundedMode==='perpetual-best-day'?'perpetual':'cycle'});
   }
 
   const api={PRESETS,OFFERS};

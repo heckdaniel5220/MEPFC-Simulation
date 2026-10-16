@@ -28,6 +28,15 @@
     // Scaling greift erst ab dllScaleFrom, das kleinste mögliche Funded-Limit ist dann max(dllFunded, Anteil × Schwelle)
     if(P.dllScaleFunded>0){ const m=Math.max(P.dllFunded,P.dllScaleFunded*P.dllScaleFrom);
       if(loss>=m) throw new Error(`Scaling: max(dllFunded, dllScaleFunded × dllScaleFrom) = ${m} $ muss größer sein als risk + cost (${loss} $), sonst ist kein Trade erlaubt`); }
+    // Consistency (M-003): bester Tag < cons % des Gewinns der Phase bzw. des Zyklus, 0 = keine Regel
+    for(const k of ['consEval','consFunded']){
+      if(P[k]===undefined) P[k]=0;
+      if(typeof P[k]!=='number' || !Number.isFinite(P[k]) || P[k]<0 || P[k]>100) throw new Error(k+' muss eine Zahl in [0, 100] sein: '+JSON.stringify(P[k]));
+    }
+    if(P.consFundedMode===undefined) P.consFundedMode='cycle';
+    if(P.consFundedMode!=='cycle' && P.consFundedMode!=='perpetual') throw new Error("consFundedMode muss 'cycle' oder 'perpetual' sein: "+JSON.stringify(P.consFundedMode));
+    if(P.consCompliant===undefined) P.consCompliant=true;
+    if(typeof P.consCompliant!=='boolean') throw new Error('consCompliant muss true oder false sein: '+JSON.stringify(P.consCompliant));
     P.p=P.wr/100; P.h=P.hp/100; P.wf=P.wfrac/100; P.sp=P.split/100;
     return P;
   }
@@ -47,13 +56,18 @@
      Zufallszahl. Die Tagesnummer läuft je Account fortlaufend über alle Phasen.
      Daily Loss Limit: dllEval (Challenge), dllFunded (Funded, optional Scaling auf Anteil × höchster EOD-Gewinn).
      Regeltreu (dllCompliant): kein Trade, dessen voller Verlust (risk + cost) das Limit erreichen würde; der Tag endet.
-     Sonst Prüfung nach dem Trade (Drawdown zuerst): soft beendet den Tag, hard beendet Challenge bzw. Account. */
+     Sonst Prüfung nach dem Trade (Drawdown zuerst): soft beendet den Tag, hard beendet Challenge bzw. Account.
+     Consistency: Bestehen bzw. Auszahlung erst, wenn bester Tag < cons % des Phasen- bzw. Zyklusgewinns
+     (bester Tag = max(bester abgeschlossener Tag, laufender Tages-P&L)). Blockiert die Regel, endet der Tag
+     bei consCompliant, sonst wird weiter getradet. Zyklusgewinn = eq − Stand direkt nach der letzten Auszahlung;
+     'cycle' setzt den besten Tag nach dem Auszahlungstag auf 0, 'perpetual' nie. */
   function simulate(P, seed){
     const r=mulberry32(seed>>>0), MAXT=500, TPD=P.tradesPerDay||1;
     const res={accts:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
       hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0};
     const PH=['step1','step2','funded'], sum={}, toPass=[];
-    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0};
+    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,consBlocks:0};
+    const delays=[]; let hitN=0, hitFail=0;
     const LOSS=P.risk+P.cost, hard=P.dllType==='hard';
     let real=0, cNo=0, cHe=0;
     for(let i=0;i<P.n;i++){
@@ -68,7 +82,7 @@
         return gross-P.cost;
       };
       // Tageszähler einer Phase; ein Tag zählt nur mit mindestens einem Trade
-      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0}; a.phases[k]=ph; return ph; };
+      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,consBlocks:0,bestDay:[]}; a.phases[k]=ph; return ph; };
       // DLL vor dem Trade (regeltreu): true = Trade verweigert, Tag endet
       const refuse=(ph,lim,pnl)=>{ if(lim>0 && P.dllCompliant && pnl-LOSS<=-lim){ ph.dllStops++; return true; } return false; };
       // DLL nach dem Trade (nicht regeltreu): 0 = weiter, 1 = Tag endet (soft), 2 = Bruch (hard)
@@ -78,38 +92,53 @@
         if(slotLeft) ph.dllStops++;
         return 1;
       };
-      const closeDay=(ph,pnl,lim)=>{
+      // Consistency: true = Bestehen bzw. Auszahlung erlaubt
+      const consOk=(pct,best,pnl,gain)=>!(pct>0) || Math.max(best,pnl) < pct/100*gain;
+      // Blockade höchstens einmal pro Tag zählen
+      const block=(ph,st)=>{ if(!st.blk){ st.blk=true; ph.consBlocks++; } };
+      const closeDay=(ph,pnl,lim,best)=>{
         ph.days++; if(pnl>0) ph.winDays++;
         if(ph.firstDay===null) ph.firstDay=day;
-        ph.lastDay=day; if(detail){ ph.dayPnl.push(pnl); ph.dayDll.push(lim); }
+        ph.lastDay=day; if(detail){ ph.dayPnl.push(pnl); ph.dayDll.push(lim); ph.bestDay.push(best); }
       };
       if(P.mode==='challenge'){
         const phases=[P.target]; if(P.target2>0) phases.push(P.target2);
-        let ok=true;
+        let ok=true, delay=0;
         for(let s=0;s<phases.length;s++){
           const tg=phases[s], ph=openPhase(PH[s]);
-          let eq=0,peak=0,done=false,t=0,end=false;
+          let eq=0,peak=0,done=false,t=0,end=false,best=0,hit=false,firstBlk=null;
           while(!end && t<MAXT){
-            day++; let pnl=0;
+            day++; let pnl=0; const st={blk:false};
             for(let k=0;k<TPD && t<MAXT;k++){
               if(refuse(ph,P.dllEval,pnl)) break;
               const x=trade(P.h>0,'e'); t++; pnl+=x;
               eq+=x; if(eq>peak) peak=eq;
-              if(eq>=tg){done=true;end=true;break;}
+              let blocked=false;
+              if(eq>=tg){
+                hit=true;
+                if(consOk(P.consEval,best,pnl,eq)){done=true;end=true;break;}
+                block(ph,st); if(firstBlk===null) firstBlk=day; blocked=true;
+              }
               const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){end=true;break;}
               const b=breach(ph,P.dllEval,pnl,k+1<TPD && t<MAXT); if(b===2){end=true;break;} if(b===1) break;
+              // Regeltreu: Ziel erreicht, Regel blockiert → Tag endet
+              if(blocked && P.consCompliant) break;
             }
-            closeDay(ph,pnl,P.dllEval);
+            if(pnl>best) best=pnl;
+            closeDay(ph,pnl,P.dllEval,best);
           }
+          if(hit){ hitN++; if(!done) hitFail++; }
           if(!done){ok=false;break;}
+          if(firstBlk!==null) delay+=day-firstBlk;
         }
+        if(ok) delays.push(delay);
         a.passed=ok;
       }
       if(a.passed){
         const ph=openPhase('funded');
-        let eq=0,peak=0,t=0,peakEod=0;
+        let eq=0,peak=0,t=0,peakEod=0,best=0,base=0;
         while(t<MAXT && a.nPay<P.maxp && !a.blown){
-          day++; let pnl=0;
+          day++; let pnl=0, paid=false; const st={blk:false};
           // Aktives Limit für den ganzen Tag; Scaling ab dllScaleFrom, Höchstwert sinkt nie
           const lim = P.dllScaleFunded>0 && peakEod>=P.dllScaleFrom ? Math.max(P.dllFunded,P.dllScaleFunded*peakEod) : P.dllFunded;
           for(let k=0;k<TPD && t<MAXT;k++){
@@ -121,14 +150,19 @@
             const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){a.blown=true;break;}
             const b=breach(ph,lim,pnl,k+1<TPD && t<MAXT); if(b===2){a.blown=true;break;} if(b===1) break;
             // Auszahlung beendet den Tag (kein Phasenwechsel)
-            if(eq>=P.buf+P.minp){ const w=Math.min(P.cap,(eq-P.buf)*P.wf); eq-=w; a.pay+=w*P.sp; a.nPay++; break; }
+            if(eq>=P.buf+P.minp){
+              if(consOk(P.consFunded,best,pnl,eq-base)){ const w=Math.min(P.cap,(eq-P.buf)*P.wf); eq-=w; a.pay+=w*P.sp; a.nPay++; base=eq; paid=true; break; }
+              block(ph,st); if(P.consCompliant) break;
+            }
           }
-          closeDay(ph,pnl,lim);
+          // 'cycle': Auszahlungstag gehört zum alten Zyklus, danach bester Tag 0; 'perpetual': kein Reset
+          if(paid && P.consFundedMode==='cycle') best=0; else if(pnl>best) best=pnl;
+          closeDay(ph,pnl,lim,best);
           // EOD-Gewinn nach einer eventuellen Auszahlung
           if(eq>peakEod) peakEod=eq;
         }
       }
-      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; } }
+      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].consBlocks+=ph.consBlocks; } }
       if(P.mode==='challenge' && a.passed) toPass.push(a.phases.step1.days+(a.phases.step2?a.phases.step2.days:0));
       a.hedge=a.hedgeEval+a.hedgeFund;
       const success = P.mode==='instant' ? a.nPay>0 : a.passed;
@@ -146,8 +180,11 @@
     // Mittelwerte je Phase nur über Accounts, die die Phase erreicht haben (sonst null)
     res.days={};
     for(const k of PH){ const s=sum[k]; res.days[k]={n:s.n,tradingDays:s.n?s.tradingDays/s.n:null,winDays:s.n?s.winDays/s.n:null,
-      dllStops:s.n?s.dllStops/s.n:null,dllBreaches:s.n?s.dllBreaches/s.n:null}; }
+      dllStops:s.n?s.dllStops/s.n:null,dllBreaches:s.n?s.dllBreaches/s.n:null,consBlocks:s.n?s.consBlocks/s.n:null}; }
     res.medianDaysToPass=median(toPass);
+    // Consistency: Zusatztage vom ersten Blockade-Tag bis zum Bestehen (Step 1 + Step 2), Mittel über bestandene Accounts
+    res.consPassDelay=delays.length?delays.reduce((x,y)=>x+y,0)/delays.length:null;
+    res.consTargetFails={n:hitFail,hit:hitN,share:hitN?hitFail/hitN:null};
     return res;
   }
 
