@@ -8,7 +8,10 @@
 
   const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const {PRESETS,OFFERS}=window.GlitchData;
-  const {simulate}=window.GlitchSim;
+  const {simulate,prepare}=window.GlitchSim;
+  const {autoParams}=window.GlitchParams;
+  // Strategie-Regler (M-007a): Trades pro Tag, Auto-Risiko in % des Drawdowns, Kosten in % des Risikos
+  const EXTRA=['tradesPerDay','riskPct','costPct'];
   let seed = 20261015;
 
 
@@ -18,14 +21,18 @@
     const ni=$(k+'-n'), v=ni?num(ni.value):NaN;
     let x=isFinite(v)?v:parseFloat($(k).value);
     // Anzahlen sind ganz und ≥ 1, sonst läuft die Schleife einen Account mehr (100,5 → 101)
-    if(k==='n'||k==='maxp') x=Math.max(1,Math.round(x));
+    if(k==='n'||k==='maxp'||k==='tradesPerDay') x=Math.max(1,Math.round(x));
     return x;
   }
-  function read(){
-    const P={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked};
-    IDS.forEach(k=>P[k]=val(k));
-    return window.GlitchSim.prepare(P);
+  // Werte aller UI-Felder, die in P landen
+  function uiVals(){
+    const u={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked,
+      tradesPerDay:val('tradesPerDay'),dllCompliant:$('dllCompliant').checked,consCompliant:$('consCompliant').checked};
+    IDS.forEach(k=>u[k]=val(k));
+    return u;
   }
+  // UI gewinnt; vom gewählten Angebot kommen nur die Felder ohne UI-Element (DLL, Consistency, …). Unvorbereitet.
+  function read(){ return autoParams(OFFER_BY[$('offer').value],uiVals()); }
   function apply(pr){
     $('mode').value=pr.mode; $('hfund').checked=!!pr.hfund; $('ddstatic').checked=!!pr.ddStatic;
     IDS.forEach(k=>{
@@ -62,16 +69,35 @@
     svg.innerHTML=s;
   }
 
+  const RES=document.querySelector('.results');
+  function blocked(msg){
+    $('err').textContent=msg; $('err').hidden=false; RES.classList.add('blocked');
+    last=null;
+  }
+  function ruleHint(P,off){
+    if(!off) return 'Die beiden Schalter wirken nur bei einem gewählten Angebot mit Tageslimit bzw. Consistency-Regel.';
+    const dll=P.dllEval>0||P.dllFunded>0||P.dllScaleFunded>0, cons=P.consEval>0||P.consFunded>0;
+    if(dll&&cons) return '';
+    if(!dll&&!cons) return 'Dieses Angebot hat weder Tageslimit noch Consistency-Regel: beide Schalter ohne Wirkung.';
+    return dll?'Dieses Angebot hat keine Consistency-Regel: Schalter „Consistency regeltreu“ ohne Wirkung.':'Dieses Angebot hat kein Tageslimit: Schalter „Daily Loss Limit regeltreu“ ohne Wirkung.';
+  }
   function render(){
-    const P=read();
-    const instant=P.mode==='instant';
+    const P0=read(), off=OFFER_BY[$('offer').value];
+    const instant=P0.mode==='instant';
+    ['target','target2'].forEach(k=>{ $('w-'+k).classList.toggle('dis',instant); $(k).disabled=instant; $(k+'-n').disabled=instant; });
+    const autoOn=!!off&&$('autorisk').checked;
+    ['riskPct','costPct'].forEach(k=>{ $('w-'+k).classList.toggle('dis',!autoOn); $(k).disabled=!autoOn; $(k+'-n').disabled=!autoOn; });
+    $('rule-hint').textContent=ruleHint(P0,off);
+    if(P0.notTradable) return blocked(P0.reason);
+    let P,R;
+    try{ P=prepare(P0); R=simulate(P,seed); }
+    catch(e){ return blocked('Simulation nicht möglich: '+e.message); }
+    $('err').hidden=true; RES.classList.remove('blocked');
     const be=1/(1+P.rr), beC=(P.risk+P.cost)/(P.risk*(1+P.rr));
     $('wr-hint').textContent=`Ohne Edge bei diesem CRV: ${fmt0.format(be*100)} %, mit Kosten ${fmt0.format(beC*100)} %. ${P.p>beC+0.005?'Über Break-even: Edge vorhanden.':P.p<be-0.005?'Unter Break-even: negativer Edge.':'Etwa Break-even: kein Edge.'}`;
     const calibH = instant ? P.fee/P.dd : P.fee/P.dd;
     $('hp-hint').textContent=`Fee genau zurück = Fee ÷ Drawdown = ${String((calibH*100).toFixed(1)).replace('.',',')} %. Etwas mehr bringt beim Verlieren einen kleinen Gewinn. 0 % = kein Gegentrade.`;
-    ['target','target2'].forEach(k=>{ $('w-'+k).classList.toggle('dis',instant); $(k).disabled=instant; $(k+'-n').disabled=instant; });
 
-    const R=simulate(P,seed);
     const n=P.n;
     $('k-no').textContent=sgn(R.netNo/n); $('k-no').className='val '+(R.netNo>=0?'pos':'neg');
     $('k-no-s').textContent=`pro Account · gesamt ${sgn(R.netNo)}`;
@@ -97,7 +123,6 @@
     drawChart(R,P);
 
     // seine rechnung
-    const off=OFFER_BY[$('offer').value];
     const won = instant ? Math.min(P.cap,P.minp*P.wf) : P.target;
     const mine = 0.5*won-0.5*P.fee;
     const avgPayPassed = (instant? (R.paid? R.pay/R.paid:0) : (R.passed? R.pay/R.passed:0));
@@ -191,14 +216,14 @@
   $('trace').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]'); if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault(); toggle(tr); const n=$('trace').querySelector(`tr[data-i="${tr.dataset.i}"]`); if(n) n.focus();}});
 
   // Zahlenfelder neben jeden Regler setzen
-  const UNIT={fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:''};
+  const UNIT={tradesPerDay:'×',riskPct:'%',costPct:'%',fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:''};
   const PRE={rr:'1 :'};
-  IDS.forEach(k=>{
+  IDS.concat(EXTRA).forEach(k=>{
     const rg=$(k), out=$(k+'-o'); if(!out) return;
     const box=document.createElement('span'); box.className='numbox';
     if(PRE[k]){const p=document.createElement('span');p.className='unit';p.textContent=PRE[k];box.appendChild(p);}
     const ni=document.createElement('input'); ni.type='number'; ni.id=k+'-n'; ni.inputMode='decimal';
-    ni.step=rg.step; ni.min=0; ni.setAttribute('aria-label',(document.querySelector(`label[for="${k}"]`)||{}).textContent||k);
+    ni.step=rg.step; ni.min=0; ni.value=rg.value; ni.setAttribute('aria-label',(document.querySelector(`label[for="${k}"]`)||{}).textContent||k);
     box.appendChild(ni);
     if(UNIT[k]){const u=document.createElement('span');u.className='unit';u.textContent=UNIT[k];box.appendChild(u);}
     out.replaceWith(box);
@@ -219,19 +244,41 @@
       gr.items.forEach(o=>{OFFER_BY[o.id]=Object.assign({firm:gr.g.split(' · ')[0]},o);const op=document.createElement('option');op.value=o.id;op.textContent=`${o.n} · ${fmt0.format(o.fee)} $`;og.appendChild(op);});
       sel.appendChild(og);});
   })();
+  const pctTxt=v=>String(Math.round(v*100)/100).replace('.',',');
+  // DLL und Consistency des Angebots in Worten
+  function rulesTxt(o){
+    const ch=o.mode==='challenge', t=[];
+    if(o.dllEval>0||o.dllFunded>0||o.dllScaleFunded>0){
+      const parts=[]; if(ch&&o.dllEval>0) parts.push('Challenge '+usd(o.dllEval)); if(o.dllFunded>0) parts.push('Funded '+usd(o.dllFunded));
+      if(ch&&!(o.dllEval>0)) parts.push('in der Challenge keins'); if(!(o.dllFunded>0)) parts.push('im Funded keins');
+      const sc=o.dllScaleFunded>0?`, ab ${usd(o.dllScaleFrom)} Gewinn mind. ${pctTxt(o.dllScaleFunded*100)} % des höchsten Tagesend-Gewinns`:'';
+      t.push(`Tageslimit ${parts.join(', ')}${sc} (${o.dllType==='hard'?'hart: Bruch beendet Challenge bzw. Account':'weich: Tag endet'})`);
+    } else t.push('kein Tageslimit');
+    if(o.consEval>0||o.consFunded>0){
+      const parts=[]; if(ch&&o.consEval>0) parts.push(`Challenge ${pctTxt(o.consEval)} %`);
+      if(o.consFunded>0) parts.push(`Funded ${pctTxt(o.consFunded)} % ${o.consFundedMode==='perpetual'?'über alle Funded-Tage':'je Auszahlungszyklus'}`);
+      t.push(`Consistency (bester Tag < Anteil am Gewinn) ${parts.join(', ')}`);
+    } else t.push('keine Consistency-Regel');
+    return t.join('. ')+'.';
+  }
   function applyOffer(id){
     const o=OFFER_BY[id]; if(!o){ $('offer-note').textContent='Eigene Werte. Wähle ein Angebot, um Fee, Ziel, Drawdown und Payout-Regeln automatisch zu setzen.'; return; }
-    const cur=read();
-    const pr={mode:o.mode,fee:o.fee,target:o.mode==='instant'?0:o.target,target2:o.mode==='instant'?0:(o.target2||0),dd:o.dd,ddStatic:!!o.ddStatic,buf:o.buf,minp:o.minp,wfrac:o.wfrac,cap:o.cap,split:o.split,maxp:o.maxp,
-      risk:cur.risk,rr:cur.rr,wr:cur.wr,cost:cur.cost,hfund:false,n:cur.n,
-      hp:Math.min(30,Math.round(o.fee*1.25/o.dd*200)/2)};
-    if($('autorisk').checked){ pr.risk=Math.max(10,Math.round(o.dd*0.25/5)*5); if(o.maxRisk) pr.risk=Math.min(pr.risk,o.maxRisk); pr.cost=Math.max(1,Math.round(pr.risk*0.02)); }
-    apply(pr);
+    const cur=uiVals(), autorisk=$('autorisk').checked, riskPct=val('riskPct'), costPct=val('costPct');
+    const strat={wr:cur.wr,rr:cur.rr,n:cur.n,tradesPerDay:cur.tradesPerDay,dllCompliant:cur.dllCompliant,consCompliant:cur.consCompliant,riskPct,costPct,autorisk};
+    if(!autorisk){ strat.risk=cur.risk; strat.cost=cur.cost; }
+    const P=autoParams(o,strat);
+    apply(P);
     const two=o.target2?` → ${usd(o.target2)}`:'';
-    $('offer-note').innerHTML=`<b>${o.n}</b>: ${o.mode==='instant'?'ohne Challenge':'Ziel '+usd(o.target)+two}, Drawdown ${usd(o.dd)} ${o.ddStatic?'statisch':'trailing'}. Fee ${usd(o.fee)} (Liste ${o.list}, Code ${o.code}).<br>${o.note}${$('autorisk').checked?`<br>Risiko pro Trade = 25 % des Drawdowns${o.maxRisk?', max. 1 % des Kontos (Firmenregel)':''}, Kosten = 2 % des Risikos.`:''}`;
+    const size=o.rules&&o.rules.size;
+    const mr=o.maxRisk?`, max. ${usd(o.maxRisk)} offenes Risiko${size?` (${pctTxt(o.maxRisk/size*100)} % des Kontos)`:''}, Firmenregel, gilt hier auch in der Challenge (Modellannahme)`:'';
+    $('offer-note').innerHTML=`<b>${o.n}</b>: ${o.mode==='instant'?'ohne Challenge':'Ziel '+usd(o.target)+two}, Drawdown ${usd(o.dd)} ${o.ddStatic?'statisch':'trailing'}. Fee ${usd(o.fee)} (Liste ${o.list}, Code ${o.code}).<br>${rulesTxt(o)}<br>${o.note}`
+      +(autorisk?`<br>Risiko pro Trade = ${pctTxt(riskPct)} % des Drawdowns${mr}, Kosten = ${pctTxt(costPct)} % des Risikos. Ändern von Risiko- oder Kosten-% setzt die Angebotswerte zurück.`:'')
+      +(P.riskCapped?`<br><b>Risiko gedeckelt (DLL):</b> ${P.reason}`:'');
   }
   $('offer').addEventListener('change',e=>{applyOffer(e.target.value);setPressed('');render();});
   $('autorisk').addEventListener('change',()=>{if($('offer').value){applyOffer($('offer').value);render();}});
+  // Risiko- oder Kosten-% ändern: Angebot neu anwenden (setzt von Hand geänderte Angebotswerte zurück)
+  ['riskPct','costPct'].forEach(k=>[k,k+'-n'].forEach(id=>$(id).addEventListener('input',()=>{if($('offer').value&&$('autorisk').checked) applyOffer($('offer').value);})));
 
   let tm; const schedule=()=>{clearTimeout(tm);tm=setTimeout(render,60);};
   const setPressed=id=>document.querySelectorAll('.presets button').forEach(b=>b.setAttribute('aria-pressed',b.id===id?'true':'false'));

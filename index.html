@@ -33,6 +33,8 @@
           <select id="offer" class="sel"><option value="">– eigene Werte –</option></select>
         </div>
         <label class="check"><input type="checkbox" id="autorisk" checked> Risiko &amp; Kosten an Account-Größe anpassen</label>
+        <div class="ctl" id="w-riskPct"><div class="row"><label for="riskPct">Risiko in % des Drawdowns</label><output id="riskPct-o"></output></div><input type="range" id="riskPct" min="5" max="100" step="1" value="25"></div>
+        <div class="ctl" id="w-costPct"><div class="row"><label for="costPct">Kosten in % des Risikos</label><output id="costPct-o"></output></div><input type="range" id="costPct" min="0" max="20" step="0.5" value="2"></div>
         <div class="offer-note" id="offer-note">Wähle ein Angebot. Fee, Ziel, Drawdown und Payout-Regeln werden automatisch gesetzt.</div>
       </fieldset>
       <fieldset>
@@ -57,10 +59,14 @@
 
       <fieldset>
         <legend>Trading</legend>
-        <div class="ctl"><div class="row"><label for="risk">Risiko pro Trade</label><output id="risk-o"></output></div><input type="range" id="risk" min="50" max="3000" step="50"></div>
+        <div class="ctl"><div class="row"><label for="risk">Risiko pro Trade</label><output id="risk-o"></output></div><input type="range" id="risk" min="5" max="3000" step="5"></div>
         <div class="ctl"><div class="row"><label for="rr">Chance-Risiko (CRV)</label><output id="rr-o"></output></div><input type="range" id="rr" min="0.5" max="4" step="0.1"></div>
         <div class="ctl"><div class="row"><label for="wr">Trefferquote</label><output id="wr-o"></output></div><input type="range" id="wr" min="10" max="80" step="1"><small id="wr-hint"></small></div>
         <div class="ctl"><div class="row"><label for="cost">Kosten pro Trade (Spread + Kommission)</label><output id="cost-o"></output></div><input type="range" id="cost" min="0" max="60" step="1"></div>
+        <div class="ctl"><div class="row"><label for="tradesPerDay">Trades pro Tag</label><output id="tradesPerDay-o"></output></div><input type="range" id="tradesPerDay" min="1" max="10" step="1" value="1"></div>
+        <label class="check"><input type="checkbox" id="dllCompliant" checked> Daily Loss Limit regeltreu (keinen Trade eröffnen, der das Tageslimit reißen kann)</label>
+        <label class="check"><input type="checkbox" id="consCompliant" checked> Consistency regeltreu (Tag beenden, wenn die Regel Ziel oder Auszahlung blockiert)</label>
+        <small class="note" id="rule-hint"></small>
       </fieldset>
 
       <fieldset class="hedge-legend">
@@ -96,6 +102,7 @@
       </div>
 
       <div class="verdict" id="verdict"></div>
+      <div class="errbox" id="err" role="alert" hidden></div>
 
       <div class="panel">
         <h2>Kontostand über alle Accounts</h2>
@@ -127,13 +134,14 @@
         <p class="note">Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung. Die ersten 12 Accounts (▸) lassen sich aufklappen: Tage je Phase und Tages-P&amp;L. Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
       </div>
 
-      <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft, Consistency-Regeln, die 15 %-Best-Day-Regel von Alpha Direct und Slippage sind nicht abgebildet. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
+      <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft. Daily Loss Limit und Consistency-Regeln der Angebote sind abgebildet, Gewinntage, Mindesttage, Auszahlungsrhythmen und Slippage nicht. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
     </div>
   </div>
 </div>
 
 <script src="js/sim.js"></script>
 <script src="js/offers.js"></script>
+<script src="js/params.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
