@@ -9,8 +9,8 @@
   // Steuerfelder der Rangliste, die nicht an autoParams gehen
   const RANK_KEYS=['seed','today'];
   // Sortierschlüssel → Zeilenfeld; Tage aufsteigend, alles andere absteigend
-  const SORT_KEYS={net:'net',netHe:'netHe',roi:'roi',netPer1k:'netPer1k',payout:'payout',days:'days'};
-  const ASC={days:true};
+  const SORT_KEYS={net:'net',netHe:'netHe',roi:'roi',netPer1k:'netPer1k',payout:'payout',days:'days',calDays:'calDays'};
+  const ASC={days:true,calDays:true};
   // Spanne je Schlüssel für „gleichauf“
   const TIE_KEYS={net:['netLo','netHi'],roi:['roiLo','roiHi']};
 
@@ -55,7 +55,7 @@
       fee:offer.fee,dd:offer.dd,size:accountSize(offer),code:offer.code,codeMark:codeMark(offer,ctx.today),
       risk:P.risk,cost:P.cost,hp:P.hp,riskCapped:!!P.riskCapped,notTradable:!!P.notTradable,reason:P.reason||null,error:null,
       n:null,net:null,netLo:null,netHi:null,netHalf:null,netHe:null,netHeLo:null,netHeHi:null,netHeHalf:null,
-      roi:null,roiLo:null,roiHi:null,feesPaid:null,netPer1k:null,pass:null,payout:null,avgPayouts:null,days:null,q5NetHe:null,q5Hedge:null,
+      roi:null,roiLo:null,roiHi:null,feesMean:null,netPer1k:null,pass:null,payout:null,avgPayouts:null,days:null,calDays:null,q5NetHe:null,q5Hedge:null,
       P};
   }
 
@@ -69,14 +69,16 @@
     // ROI-Nenner (M-005): mittlere gezahlte Gebühren je Account (inkl. Monatsabo); fehlt feesPaid, gilt offer.fee
     const paidFees=L.map(x=>x.feesPaid).filter(v=>typeof v==='number' && Number.isFinite(v));
     const fees=paidFees.length===n && n>0 ? mean(paidFees) : offer.fee;
+    // Kalendertag der 1. Auszahlung (M-005); fehlt das Feld, bleibt die Kennzahl null
+    const calDays=L.map(x=>x.calToFirstPay).filter(v=>v!==null && v!==undefined);
     Object.assign(row,{n,
       net:no.mean,netLo:no.lo,netHi:no.hi,netHalf:no.half,
       netHe:he.mean,netHeLo:he.lo,netHeHi:he.hi,netHeHalf:he.half,
-      roi:no.mean/fees,roiLo:no.lo/fees,roiHi:no.hi/fees,feesPaid:fees,
+      roi:no.mean/fees,roiLo:no.lo/fees,roiHi:no.hi/fees,feesMean:fees,
       netPer1k:no.mean/P.dd*1000,
       pass:offer.mode==='instant'?null:R.passed/n,
       payout:R.paid/n,avgPayouts:R.nPayTot/n,
-      days:mean(days),
+      days:mean(days),calDays:mean(calDays),
       q5NetHe:quantile(L.map(x=>x.netHe),0.05),
       q5Hedge:quantile(L.map(x=>x.hedge),0.05)});
     return row;
