@@ -263,4 +263,41 @@ test('Integration: alle Angebote, deterministisch, n 1000 unter 5 s (Node)', () 
   console.log(`    Laufzeit ${total} Angebote × n 1000: ${ms} ms`);
 });
 
+test('M-005 ROI-Nenner = mittleres feesPaid aus R.list, Rückfall offer.fee', () => {
+  const o = offer('m', { fee: 100, dd: 2000 });
+  // feesPaid 100, 100, 300, 300 → Mittel 200: ROI = 150 / 200, Netto je 1.000 $ DD bleibt 150 / 2000 × 1000
+  const R = stubR(); R.list.forEach((x, i) => { x.feesPaid = i < 2 ? 100 : 300; });
+  const r = rowFromResult(o, stubP(o), R, {});
+  near(r.feesMean, 200); near(r.roi, 0.75); near(r.roiLo, r.netLo / 200); near(r.roiHi, r.netHi / 200);
+  near(r.netPer1k, 75);
+  // ohne feesPaid (älterer Kern) bzw. lückenhaft: offer.fee
+  const a = rowFromResult(o, stubP(o), stubR(), {});
+  near(a.feesMean, 100); near(a.roi, 1.5);
+  const L = stubR(); L.list[0].feesPaid = 300;
+  near(rowFromResult(o, stubP(o), L, {}).roi, 1.5);
+  // echter Kern: Alpha Futures mit Monatsabo → feesPaid ≥ fee, ROI = net / feesPaid; ohne Abo feesPaid = fee
+  const { simulate, prepare } = require('../js/sim.js');
+  const { OFFERS } = require('../js/offers.js');
+  const all = OFFERS.flatMap(g => g.items), P0 = { risk: 500, cost: 10, rr: 1.5, wr: 40, hp: 0, n: 300 };
+  for (const id of ['af-adv-50', 'mf-rapid-50']) {
+    const off = all.find(x => x.id === id), P = Object.assign({}, off, P0);
+    const row2 = rowFromResult(off, P, simulate(prepare(P), 20261015), {});
+    if (off.feeMonthly > 0) assert.ok(row2.feesMean > off.fee, id + ' Abo erhöht den Nenner');
+    else near(row2.feesMean, off.fee, 1e-9, id);
+    near(row2.roi, row2.net / row2.feesMean, 1e-12, id);
+  }
+});
+
+test('M-005 calDays: Mittel von calToFirstPay, Sortierschlüssel calDays aufsteigend, fehlt das Feld → null', () => {
+  const o = offer('k');
+  const R = stubR(); R.list[2].calToFirstPay = 14; R.list[3].calToFirstPay = 28;
+  R.list[0].calToFirstPay = null; R.list[1].calToFirstPay = null;
+  assert.strictEqual(rowFromResult(o, stubP(o), R, {}).calDays, 21);
+  assert.strictEqual(rowFromResult(o, stubP(o), stubR(), {}).calDays, null);
+  const rows = [row('x', { calDays: 30 }), row('y', { calDays: null }), row('z', { calDays: 12 })];
+  assert.deepStrictEqual(sortRows(rows, 'calDays').map(r => r.id), ['z', 'x', 'y']);
+  assert.deepStrictEqual(sortRows(rows, 'calDays', 'desc').map(r => r.id), ['x', 'z', 'y']);
+  assert.ok(Rank.SORT_KEYS.calDays === 'calDays');
+});
+
 console.log(`\n${passed} Tests bestanden.`);
