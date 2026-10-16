@@ -1183,4 +1183,162 @@ test('M-005 Daten: Kalender- und Gebührenfelder aus rules, Anzahl je Anbieter, 
   for (const k of Object.keys(PRESETS)) for (const f of [...CAL_KEYS, 'calCompliant']) assert.strictEqual(PRESETS[k][f], undefined, k + ' ' + f);
 });
 
+// ---- Slippage am Stop-Loss (M-017) ----
+const SLIP_KEYS = ['slipMode', 'slipPct', 'slipTailPct', 'slipTailProb', 'slipBuffer'];
+// Alle Kernfelder eines Angebots (DLL, Consistency, Tage, Kalender) mit den Trading-Parametern von offerP
+const fullP = (o, over) => offerP(o, { ...Object.fromEntries(Object.keys(o).filter(k => /^(dll|cons|eval|pay|fee)/.test(k)).map(k => [k, o[k]])), fee: o.fee, ...over });
+// Immer Verlust (wr 0), 2 Trades pro Tag, Tageslimit 250 $: 2 × 110 $ ohne Slippage erlaubt, 2 × 130 $ mit 20 % reißt es
+const lossDay = over => simulate(det({ wr: 0, target: 1e9, dd: 10000, ddStatic: true, tradesPerDay: 2, dllEval: 250, n: 1, ...over }), 1);
+
+test('M-017 bit-identisch: ohne Felder = none = fixed 0 % = dist 0 % (alle Angebote, PRESETS, tpd 1 und 3)', () => {
+  const vars = [{ slipMode: 'none' }, { slipMode: 'fixed', slipPct: 0 }, { slipMode: 'dist', slipPct: 0, slipTailPct: 0, slipTailProb: 0.5 }];
+  for (const tpd of [1, 3]) {
+    for (const o of ALL) {
+      let A; try { A = simulate(fullP(o, { n: 200, tradesPerDay: tpd }), SEED); } catch (e) { continue; } // Gewinntag-Schwelle unerreichbar
+      const a = JSON.stringify(A);
+      for (const v of vars) assert.strictEqual(JSON.stringify(simulate(fullP(o, { n: 200, tradesPerDay: tpd, ...v }), SEED)), a, o.id + ' ' + JSON.stringify(v));
+      assert.strictEqual(A.slipPaid, 0, o.id);
+    }
+    for (const k of Object.keys(PRESETS)) {
+      const a = JSON.stringify(simulate(prepare({ ...PRESETS[k], tradesPerDay: tpd }), SEED));
+      for (const v of vars) assert.strictEqual(JSON.stringify(simulate(prepare({ ...PRESETS[k], tradesPerDay: tpd, ...v }), SEED)), a, k);
+    }
+  }
+  // Golden (M-001) mit fixed 0 %
+  for (const k of Object.keys(GOLD)) assert.deepStrictEqual(kpi(simulate(prepare({ ...PRESETS[k], n: 2000, slipMode: 'fixed', slipPct: 0 }), SEED), 2000), GOLD[k], k);
+  for (const k of Object.keys(PRESETS)) for (const f of SLIP_KEYS) assert.strictEqual(PRESETS[k][f], undefined, k + ' ' + f);
+  for (const o of ALL) for (const f of SLIP_KEYS) assert.strictEqual(o[f], undefined, o.id + ' ' + f);
+});
+
+// Ziel und DD unerreichbar: 500 Trades bis MAXT, 1 Trade pro Tag
+const streamRun = over => simulate(det({ wr: 50, target: 1e9, dd: 1e9, n: 1, ...over }), SEED).accts[0].phases.step1;
+
+test('M-017 Gewinn-Trades ohne Slippage: Gewinn-Tage unverändert, auch bei dist', () => {
+  const A = streamRun({}), B = streamRun({ slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.1 });
+  let wins = 0;
+  A.dayPnl.forEach((x, i) => { if (x > 0) { wins++; assert.strictEqual(B.dayPnl[i], 190, 'Tag ' + i); } else assert.ok(B.dayPnl[i] <= -115, 'Tag ' + i); });
+  assert.ok(wins > 200, 'Gewinne ' + wins);
+});
+
+test('M-017 Zufallsstrom: gleiche Trades, Verluste um slip teurer', () => {
+  const A = streamRun({}), B = streamRun({ slipMode: 'fixed', slipPct: 10 });
+  assert.strictEqual(A.days, 500); assert.strictEqual(B.days, 500);
+  let losses = 0;
+  A.dayPnl.forEach((x, i) => {
+    if (x > 0) assert.strictEqual(B.dayPnl[i], x, 'Gewinn-Tag ' + i);
+    else { losses++; assert.strictEqual(x, -110); assert.strictEqual(B.dayPnl[i], -120, 'Verlust-Tag ' + i); }
+  });
+  assert.ok(losses > 200 && losses < 300, 'Verluste ' + losses);
+  const sum = xs => xs.reduce((a, b) => a + b, 0);
+  assert.strictEqual(sum(B.dayPnl) - sum(A.dayPnl), -10 * losses);
+});
+
+test("M-017 dist: Anteil der Ausreißer ≈ slipTailProb, dist mit Anteil 0 = fixed", () => {
+  const R = simulate(det({ wr: 40, target: 1e9, dd: 1e9, n: 20, slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.1 }), SEED);
+  let norm = 0, tail = 0;
+  for (const a of R.accts) for (const x of a.phases.step1.dayPnl) { if (x === -115) norm++; else if (x === -210) tail++; else assert.strictEqual(x, 190); }
+  const share = tail / (norm + tail);
+  assert.ok(norm + tail > 3000, 'Verluste (12 Detail-Accounts) ' + (norm + tail));
+  assert.ok(Math.abs(share - 0.1) < 0.02, 'Anteil ' + share.toFixed(4));
+  const f = { ...PRESETS.edge, n: 1000, tradesPerDay: 3 };
+  assert.strictEqual(JSON.stringify(simulate(prepare({ ...f, slipMode: 'dist', slipPct: 10, slipTailPct: 80, slipTailProb: 0 }), SEED)),
+    JSON.stringify(simulate(prepare({ ...f, slipMode: 'fixed', slipPct: 10, slipTailPct: 80, slipTailProb: 0.3 }), SEED)));
+});
+
+test('M-017 regeltreu: DLL-Bruch durch Slippage, soft beendet den Tag, hard die Challenge', () => {
+  const none = lossDay({}).accts[0].phases.step1;
+  assert.deepStrictEqual([none.dayPnl[0], none.dllSlipBreaches, none.dllBreaches], [-220, 0, 0], 'ohne Slippage kein Bruch');
+  const soft = lossDay({ slipMode: 'fixed', slipPct: 20 }).accts[0].phases.step1;
+  // 38 Tage mit −260 $ (Bruch durch Slippage), Tag 39: −9.880 − 130 = −10.010 ≤ −10.000
+  assert.deepStrictEqual([soft.days, soft.dayPnl[0], soft.dllSlipBreaches, soft.dllBreaches, soft.dllStops], [39, -260, 38, 0, 0]);
+  const hR = lossDay({ slipMode: 'fixed', slipPct: 20, dllType: 'hard' }), hard = hR.accts[0].phases.step1;
+  assert.deepStrictEqual([hard.days, hard.dayPnl[0], hard.dllSlipBreaches, hard.dllBreaches, hR.fail], [1, -260, 1, 1, 1]);
+  assert.strictEqual(hR.days.step1.dllSlipBreaches, 1); assert.strictEqual(hR.days.step1.dllBreaches, 1);
+  // nicht regeltreu: der Bruch zählt nur als durch Slippage, wenn er ohne die Slippage dieses Trades nicht entstanden wäre
+  const nc = lossDay({ slipMode: 'fixed', slipPct: 20, dllCompliant: false, dllEval: 200 }).accts[0].phases.step1;
+  assert.strictEqual(nc.dllSlipBreaches, 0, '2 × 110 $ reißt 200 $ auch ohne Slippage');
+});
+
+test('M-017 DD-Bruch durch Slippage: ohne die Slippage des Trades bliebe eq über dem Floor', () => {
+  const soft = lossDay({ slipMode: 'fixed', slipPct: 20 });
+  assert.strictEqual(soft.accts[0].phases.step1.ddSlipBreaches, 1, '−10.010 $, ohne die 20 $ −9.990 $');
+  assert.strictEqual(soft.days.step1.ddSlipBreaches, 1);
+  // ohne Slippage: 45 Tage × −220 $ = −9.900, Tag 46: −10.010 → Bruch, aber nicht durch Slippage
+  const none = lossDay({}).accts[0].phases.step1;
+  assert.deepStrictEqual([none.days, none.ddSlipBreaches], [46, 0]);
+  // Bruch auch ohne die Slippage dieses Trades (dd 9.950: −9.880 − 110 = −9.990 ≤ −9.950) zählt nicht
+  assert.strictEqual(lossDay({ slipMode: 'fixed', slipPct: 20, dd: 9950 }).accts[0].phases.step1.ddSlipBreaches, 0);
+});
+
+test('M-017 Puffer: mit slipBuffer = slipPct kein DLL-Bruch durch Slippage', () => {
+  const R = lossDay({ slipMode: 'fixed', slipPct: 20, slipBuffer: 20 }), ph = R.accts[0].phases.step1;
+  // 2. Trade verweigert: −130 − (120 + 10) = −260 ≤ −250
+  // jeder Tag bis auf den letzten (DD-Bruch mit dem 1. Trade) endet durch Verweigerung
+  assert.deepStrictEqual([ph.dayPnl[0], ph.dllSlipBreaches, ph.dllStops, ph.days], [-130, 0, 76, 77]);
+  for (const id of ['lu-flex-50', 'ac-one-50']) {
+    const o = byId(id), B = simulate(fullP(o, { n: 500, tradesPerDay: 3, slipMode: 'fixed', slipPct: 20, slipBuffer: 20 }), SEED);
+    for (const k of ['step1', 'funded']) assert.strictEqual(B.days[k].dllSlipBreaches, 0, id + ' ' + k);
+  }
+});
+
+test('M-017 prepare() wirft, wenn risk × (1 + slipBuffer/100) + cost ein Limit im Modus erreicht', () => {
+  // 100 × (1 + 1,5) + 10 = 260 ≥ 250
+  assert.throws(() => det({ dllEval: 250, slipBuffer: 150 }), /dllEval \(250 \$\).*slipBuffer/);
+  assert.throws(() => det({ mode: 'instant', target: 0, dllFunded: 250, slipBuffer: 150 }), /dllFunded/);
+  assert.throws(() => det({ dllScaleFunded: 0.5, dllScaleFrom: 400, slipBuffer: 150 }), /Scaling/);
+  // Instant: dllEval wirkt nicht; ohne Limit ist jeder Puffer erlaubt
+  assert.doesNotThrow(() => det({ mode: 'instant', target: 0, dllEval: 250, slipBuffer: 150 }));
+  assert.doesNotThrow(() => det({ slipBuffer: 1000 }));
+  assert.doesNotThrow(() => det({ dllEval: 250, slipBuffer: 130 }));
+});
+
+test('M-017 Gegentrade: TP ohne Slippage bei Prop-Verlust, eigener Stop rutscht bei Prop-Gewinn', () => {
+  // h = 10 %, risk 100, rr 2, cost 10, Slippage 20 % = 20 $
+  const hedgeOf = over => simulate(det({ hp: 10, n: 1, ...over }), 1).accts[0];
+  // immer Gewinn: 6 Trades bis zum Ziel 1.000 (6 × 190), je −0,1 × 200 − 0,1 × 20 − 0,1 × 10 = −23
+  const w0 = hedgeOf({}), w = hedgeOf({ slipMode: 'fixed', slipPct: 20 });
+  assert.strictEqual(w.phases.step1.days, 6);
+  assert.ok(Math.abs(w0.hedgeEval - 6 * -21) < 1e-9, String(w0.hedgeEval));
+  assert.ok(Math.abs(w.hedgeEval - 6 * -23) < 1e-9, String(w.hedgeEval));
+  assert.strictEqual(w.slipPaid, 0, 'Gewinn-Trades ohne Slippage auf dem Prop-Konto');
+  // immer Verlust: je +0,1 × 100 − 0,1 × 10 = +9, mit und ohne Slippage gleich
+  const l0 = hedgeOf({ wr: 0 }), l = hedgeOf({ wr: 0, slipMode: 'fixed', slipPct: 20 });
+  assert.ok(Math.abs(l0.hedgeEval / l0.trades - 9) < 1e-9 && Math.abs(l.hedgeEval / l.trades - 9) < 1e-9);
+  assert.ok(l.trades < l0.trades, 'mit Slippage früher am DD');
+});
+
+test('M-017 slipPaid: Summe der Slippage je Account in R.list und gesamt in R', () => {
+  const R = lossDay({ slipMode: 'fixed', slipPct: 20 });
+  assert.strictEqual(R.accts[0].slipPaid, 20 * R.accts[0].trades);
+  assert.strictEqual(R.list[0].slipPaid, 20 * 77, '38 Tage × 2 + 1 Trade');
+  const E = simulate(prepare({ ...PRESETS.edge, n: 500, slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02 }), SEED);
+  assert.ok(E.slipPaid > 0);
+  assert.ok(Math.abs(E.slipPaid - E.list.reduce((a, x) => a + x.slipPaid, 0)) < 1e-6);
+  assert.ok(E.list.every(x => x.slipPaid >= 0));
+  assert.strictEqual(simulate(prepare({ ...PRESETS.edge, n: 500 }), SEED).slipPaid, 0);
+});
+
+test('M-017 prepare() prüft die Slippage-Felder', () => {
+  for (const [k, v] of [['slipMode', 'gap'], ['slipMode', 1], ['slipPct', -1], ['slipPct', '5'], ['slipPct', NaN], ['slipTailPct', -5],
+    ['slipTailPct', Infinity], ['slipTailProb', 1], ['slipTailProb', -0.1], ['slipTailProb', '0.1'], ['slipBuffer', -1], ['slipBuffer', null]])
+    assert.throws(() => prepare({ ...PRESETS.futures, [k]: v }), new RegExp(k), k + ' ' + String(v));
+  const P = prepare({ ...PRESETS.futures });
+  assert.deepStrictEqual(SLIP_KEYS.map(k => P[k]), ['none', 0, 0, 0, 0]);
+  assert.doesNotThrow(() => prepare({ ...PRESETS.futures, slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.999 }));
+});
+
+test('M-017 nie weicher: Referenz-Angebote und PRESETS mit Slippage nie besser', () => {
+  for (const id of ['af-std-50', 'ac-one-50', 'bg-cfd-instant-100', 'lu-flex-50']) for (const tpd of [1, 3]) {
+    const o = byId(id), A = simulate(fullP(o, { n: 1000, tradesPerDay: tpd }), SEED);
+    for (const v of [{ slipMode: 'fixed', slipPct: 5 }, { slipMode: 'fixed', slipPct: 20 }, { slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02 }]) {
+      const B = simulate(fullP(o, { n: 1000, tradesPerDay: tpd, ...v }), SEED);
+      assert.ok(B.netNo < A.netNo && B.netHe < A.netHe, `${id} tpd ${tpd} ${JSON.stringify(v)}: ${B.netNo} vs ${A.netNo}`);
+    }
+  }
+  for (const k of ['futures', 'edge']) {
+    const A = simulate(prepare({ ...PRESETS[k], n: 2000 }), SEED), B = simulate(prepare({ ...PRESETS[k], n: 2000, slipMode: 'fixed', slipPct: 10 }), SEED);
+    assert.ok(B.netNo < A.netNo && B.netHe < A.netHe && B.passed < A.passed, k);
+  }
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
