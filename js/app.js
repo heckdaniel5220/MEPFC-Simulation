@@ -9,7 +9,8 @@
   const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const {PRESETS,OFFERS}=window.GlitchData;
   const {simulate,prepare}=window.GlitchSim;
-  const {autoParams}=window.GlitchParams;
+  const {autoParams,stratFromUi}=window.GlitchParams;
+  const Rank=window.GlitchRank;
   // Strategie-Regler (M-007a): Trades pro Tag, Auto-Risiko in % des Drawdowns, Kosten in % des Risikos
   const EXTRA=['tradesPerDay','riskPct','costPct'];
   let seed = 20261015;
@@ -27,9 +28,18 @@
   // Werte aller UI-Felder, die in P landen
   function uiVals(){
     const u={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked,
-      tradesPerDay:val('tradesPerDay'),dllCompliant:$('dllCompliant').checked,consCompliant:$('consCompliant').checked};
+      tradesPerDay:val('tradesPerDay'),dllCompliant:$('dllCompliant').checked,consCompliant:$('consCompliant').checked,daysCompliant:$('daysCompliant').checked};
     IDS.forEach(k=>u[k]=val(k));
     return u;
+  }
+  // UI-Werte plus Steuerfelder des Auto-Risikos (Eingabe für stratFromUi)
+  function stratUi(){ return Object.assign(uiVals(),{riskPct:val('riskPct'),costPct:val('costPct'),autorisk:$('autorisk').checked}); }
+  // Strategie-Felder in die Oberfläche schreiben (Klick auf eine Ranglisten-Zeile stellt den Schnappschuss wieder her)
+  function setNum(k,v){ const rg=$(k), ni=$(k+'-n'); if(v>parseFloat(rg.max)) rg.max=v; rg.value=v; if(ni) ni.value=v; }
+  function applyStrat(st){
+    setNum('tradesPerDay',st.tradesPerDay); setNum('riskPct',st.riskPct); setNum('costPct',st.costPct);
+    ['dllCompliant','consCompliant','daysCompliant'].forEach(k=>{ $(k).checked=st[k]!==false; });
+    $('hfund').checked=!!st.hfund; $('autorisk').checked=st.autorisk!==false;
   }
   // UI gewinnt; vom gewählten Angebot kommen nur die Felder ohne UI-Element (DLL, Consistency, …). Unvorbereitet.
   function read(){ return autoParams(OFFER_BY[$('offer').value],uiVals()); }
@@ -74,18 +84,21 @@
     $('err').textContent=msg; $('err').hidden=false; RES.classList.add('blocked');
     last=null;
   }
+  const hasDays=P=>(P.mode==='challenge'&&(P.evalMinDays>0||P.evalWinDays>0))||P.payMinDays>0||P.payWinDays>0;
   function ruleHint(P,off){
-    if(!off) return 'Die beiden Schalter wirken nur bei einem gewählten Angebot mit Tageslimit bzw. Consistency-Regel.';
-    const dll=P.dllEval>0||P.dllFunded>0||P.dllScaleFunded>0, cons=P.consEval>0||P.consFunded>0;
-    if(dll&&cons) return '';
-    if(!dll&&!cons) return 'Dieses Angebot hat weder Tageslimit noch Consistency-Regel: beide Schalter ohne Wirkung.';
-    return dll?'Dieses Angebot hat keine Consistency-Regel: Schalter „Consistency regeltreu“ ohne Wirkung.':'Dieses Angebot hat kein Tageslimit: Schalter „Daily Loss Limit regeltreu“ ohne Wirkung.';
+    if(!off) return 'Die drei Schalter wirken nur bei einem gewählten Angebot mit Tageslimit, Consistency-Regel bzw. Tage-Regeln.';
+    const miss=[];
+    if(!(P.dllEval>0||P.dllFunded>0||P.dllScaleFunded>0)) miss.push(['kein Tageslimit','Daily Loss Limit regeltreu']);
+    if(!(P.consEval>0||P.consFunded>0)) miss.push(['keine Consistency-Regel','Consistency regeltreu']);
+    if(!hasDays(P)) miss.push(['keine Tage-Regeln','Tage-Regeln regeltreu']);
+    if(!miss.length) return '';
+    return `Dieses Angebot hat ${miss.map(m=>m[0]).join(', ')}: ${miss.length>1?'Schalter':'Schalter'} ${miss.map(m=>`„${m[1]}“`).join(', ')} ohne Wirkung.`;
   }
   function render(){
     const P0=read(), off=OFFER_BY[$('offer').value];
     const instant=P0.mode==='instant';
     ['target','target2'].forEach(k=>{ $('w-'+k).classList.toggle('dis',instant); $(k).disabled=instant; $(k+'-n').disabled=instant; });
-    const autoOn=!!off&&$('autorisk').checked;
+    const autoOn=$('autorisk').checked;
     ['riskPct','costPct'].forEach(k=>{ $('w-'+k).classList.toggle('dis',!autoOn); $(k).disabled=!autoOn; $(k+'-n').disabled=!autoOn; });
     $('rule-hint').textContent=ruleHint(P0,off);
     if(P0.notTradable) return blocked(P0.reason);
@@ -259,13 +272,30 @@
       if(o.consFunded>0) parts.push(`Funded ${pctTxt(o.consFunded)} % ${o.consFundedMode==='perpetual'?'über alle Funded-Tage':'je Auszahlungszyklus'}`);
       t.push(`Consistency (bester Tag < Anteil am Gewinn) ${parts.join(', ')}`);
     } else t.push('keine Consistency-Regel');
+    t.push(daysTxt(o));
     return t.join('. ')+'.';
   }
-  function applyOffer(id){
+  // Tage-Regeln (M-004): Mindest-Handelstage und Gewinntage mit Schwelle, Challenge je Step, Funded je Auszahlungszyklus
+  function daysTxt(o){
+    const win=(n,x)=>`${n} Gewinntage ${x>0?'≥ '+usd(x):'mit Gewinn > 0 $'}`;
+    const ev=[], pay=[];
+    if(o.mode==='challenge'){
+      if(o.evalMinDays>0) ev.push(`mind. ${o.evalMinDays} Handelstag${o.evalMinDays>1?'e':''}`);
+      if(o.evalWinDays>0) ev.push(win(o.evalWinDays,o.evalWinDayMin));
+    }
+    if(o.payMinDays>0) pay.push(`mind. ${o.payMinDays} Handelstag${o.payMinDays>1?'e':''}`);
+    if(o.payWinDays>0) pay.push(win(o.payWinDays,o.payWinDayMin));
+    if(!ev.length&&!pay.length) return 'keine Tage-Regeln';
+    const parts=[];
+    if(ev.length) parts.push(`Challenge ${ev.join(' und ')}${o.target2>0?' je Step':''}`);
+    if(pay.length) parts.push(`Funded ${pay.join(' und ')} je Auszahlungszyklus`);
+    return 'Tage-Regeln: '+parts.join(', ');
+  }
+  // strat: Strategie aus stratFromUi (Standard: aktuelle Oberfläche); die Rangliste übergibt ihren Schnappschuss
+  function applyOffer(id,strat){
     const o=OFFER_BY[id]; if(!o){ $('offer-note').textContent='Eigene Werte. Wähle ein Angebot, um Fee, Ziel, Drawdown und Payout-Regeln automatisch zu setzen.'; return; }
-    const cur=uiVals(), autorisk=$('autorisk').checked, riskPct=val('riskPct'), costPct=val('costPct');
-    const strat={wr:cur.wr,rr:cur.rr,n:cur.n,tradesPerDay:cur.tradesPerDay,dllCompliant:cur.dllCompliant,consCompliant:cur.consCompliant,riskPct,costPct,autorisk};
-    if(!autorisk){ strat.risk=cur.risk; strat.cost=cur.cost; }
+    strat=strat||stratFromUi(stratUi());
+    const autorisk=strat.autorisk, riskPct=strat.riskPct, costPct=strat.costPct;
     const P=autoParams(o,strat);
     apply(P);
     const two=o.target2?` → ${usd(o.target2)}`:'';
@@ -283,12 +313,150 @@
   let tm; const schedule=()=>{clearTimeout(tm);tm=setTimeout(render,60);};
   const setPressed=id=>document.querySelectorAll('.presets button').forEach(b=>b.setAttribute('aria-pressed',b.id===id?'true':'false'));
   [['p-futures','futures'],['p-coin','coin'],['p-edge','edge'],['p-instant','instant'],['p-afstd','afstd']].forEach(([id,k])=>{
-    $(id).addEventListener('click',()=>{apply(PRESETS[k]);setPressed(id);$('offer').value='';applyOffer('');render();});
+    $(id).addEventListener('click',()=>{apply(PRESETS[k]);setPressed(id);$('offer').value='';applyOffer('');render();checkStale();});
   });
   $('ctl').addEventListener('input',()=>{setPressed('');schedule();});
   $('mode').addEventListener('change',()=>{setPressed('');render();});
   $('calib').addEventListener('click',()=>{const P=read();const v=Math.min(30,Math.round(P.fee*1.25/P.dd*200)/2);$('hp').value=v;$('hp-n').value=v;render();});
-  $('reroll').addEventListener('click',()=>{seed=(seed*1103515245+12345)>>>0;render();});
+  $('reroll').addEventListener('click',()=>{seed=(seed*1103515245+12345)>>>0;render();checkStale();});
 
-  apply(PRESETS.futures); render();
+  // ---- Rangliste (M-015b): alle Angebote mit der eingestellten Strategie, ein Angebot pro setTimeout ----
+  const fmtFee=new Intl.NumberFormat('de-DE',{maximumFractionDigits:2});
+  const fee$=v=>fmtFee.format(v)+' $';
+  const pct0=v=>(v>0?'+':v<0?'−':'')+fmt0.format(Math.round(Math.abs(v*100)))+' %';
+  const today=()=>{ const d=new Date(), z=x=>String(x).padStart(2,'0'); return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`; };
+  const deDate=iso=>iso.split('-').reverse().join('.');
+  const RK={sort:'net',dir:undefined,state:null,snap:null,rows:null,ms:0,aborted:false,timer:null};
+  const ALL_OFFERS=OFFERS.reduce((a,g)=>a+g.items.length,0);
+  const rankN=()=>{ const v=Math.round(num($('rankN').value)); return isFinite(v)&&v>=1?v:1000; };
+  // Schnappschuss: Strategie (wie applyOffer sie an autoParams gibt), Gegentrade an/aus, Accounts je Angebot und Seed
+  function snapNow(){ const hedge=$('rankHedge').checked, n=rankN(); return {strat:stratFromUi(stratUi(),{n,hedge}),hedge,n,seed}; }
+  const snapKey=s=>JSON.stringify([s.strat,s.hedge,s.n,s.seed]);
+  function checkStale(){
+    $('rankStale').hidden=!RK.snap || snapKey(RK.snap)===snapKey(snapNow());
+    riskHint();
+  }
+  function riskHint(){
+    $('rankRiskHint').textContent=$('autorisk').checked
+      ? `Risiko je Angebot = ${pctTxt(val('riskPct'))} % des Drawdowns (gedeckelt auf Firmenlimit und Tageslimit), Kosten = ${pctTxt(val('costPct'))} % des Risikos.`
+      : `Auto-Risiko ist aus: Alle Angebote rechnen mit ${usd(val('risk'))} Risiko und ${usd(val('cost'))} Kosten pro Trade aus dem Steuerpult. Kleine Konten sind damit oft nicht handelbar.`;
+  }
+  function rankRun(){
+    if(RK.timer) return;
+    const snap=snapNow();
+    RK.snap=snap; RK.rows=null; RK.aborted=false;
+    RK.state=Rank.createRankState(OFFERS,Object.assign({},snap.strat,{seed:snap.seed,today:today()}),{simulate,prepare,autoParams});
+    $('rankGo').disabled=true; $('rankStop').hidden=false; $('rankStale').hidden=true;
+    const t0=performance.now();
+    const tick=()=>{
+      const st=RK.state;
+      Rank.rankOffersStep(st);
+      $('rankProg').textContent=`${fmt0.format(st.i)} / ${fmt0.format(st.total)}`;
+      if(st.done||st.cancelled){
+        RK.timer=null; RK.ms=performance.now()-t0; RK.aborted=st.cancelled; RK.rows=st.rows.slice();
+        $('rankGo').disabled=false; $('rankStop').hidden=true;
+        $('rankProg').textContent=RK.aborted
+          ? `abgebrochen nach ${fmt0.format(st.i)} / ${fmt0.format(st.total)}`
+          : `${fmt0.format(st.total)} Angebote × ${fmt0.format(snap.n)} Accounts in ${String((RK.ms/1000).toFixed(1)).replace('.',',')} s`;
+        fillFilters(); renderRank(); checkStale();
+        return;
+      }
+      RK.timer=setTimeout(tick,0);
+    };
+    RK.timer=setTimeout(tick,0);
+  }
+  function rankStop(){ if(RK.state) Rank.cancelRank(RK.state); }
+  function fillFilters(){
+    const firms=[...new Set(RK.rows.map(r=>r.firm))].sort((a,b)=>a.localeCompare(b,'de'));
+    const sizes=[...new Set(RK.rows.map(r=>r.size).filter(v=>v!==null))].sort((a,b)=>a-b);
+    const keep=(id,opts,first)=>{ const el=$(id), v=el.value; el.innerHTML=first+opts; if([...el.options].some(o=>o.value===v)) el.value=v; };
+    keep('fFirma',firms.map(f=>`<option value="${f}">${f}</option>`).join(''),'<option value="all">Alle</option>');
+    const so=sizes.map(v=>`<option value="${v}">${fmt0.format(v/1000)}k</option>`).join('');
+    keep('fSizeMin',so,'<option value="">–</option>'); keep('fSizeMax',so,'<option value="">–</option>');
+    $('rankFilter').hidden=false;
+  }
+  function curFilter(){
+    const n=id=>{ const v=num($(id).value); return isFinite(v)?v:undefined; };
+    return {markt:$('fMarkt').value,firma:$('fFirma').value,typ:$('fTyp').value,maxFee:n('fFee'),sizeMin:n('fSizeMin'),sizeMax:n('fSizeMax')};
+  }
+  // Spalten; k = Sortierschlüssel (Tage: calDays, sobald rank.js das Feld liefert)
+  function rankCols(hasCal,hedge){
+    return [['#','Platz'],['firm','Firma'],['offer','Angebot'],['fee','Fee'],['k:net','Netto/Account ± 95 %'],['k:roi','ROI'],['k:netPer1k','Netto je 1.000 $ DD'],
+      ['pass','Pass'],['k:payout','Payout'],['k:'+(hasCal?'calDays':'days'),'Ø Tage bis 1. Auszahlung'],...(hedge?[['q5','Schlechteste 5 % (Netto inkl. Gegentrade)']]:[]),['marks','Markierungen']];
+  }
+  function marks(r){
+    const m=[];
+    if(r.leader) m.push('<span class="pill lead">Platz 1</span>');
+    if(r.tie) m.push('<span class="pill tie">gleichauf</span>');
+    if(r.riskCapped) m.push(`<span class="pill cap" title="${r.reason}">Risiko gedeckelt (DLL)</span>`);
+    if(r.notTradable) m.push('<span class="pill nt">nicht handelbar</span>');
+    if(r.error) m.push(`<span class="pill exp" title="${r.error}">Fehler</span>`);
+    const c=r.codeMark;
+    if(c&&c.kind==='noExpiry') m.push(`<span class="pill code">Code ${r.code} ohne Ablauf</span>`);
+    if(c&&c.kind==='until') m.push(c.expired?`<span class="pill exp">Code ${r.code} abgelaufen (${deDate(c.until)})</span>`:`<span class="pill code">Code ${r.code} bis ${deDate(c.until)}</span>`);
+    let h=m.join('');
+    if(r.notTradable||r.error) h+=`<span class="sub">${r.reason||r.error}</span>`;
+    else if(r.riskCapped) h+=`<span class="sub">${r.reason}</span>`;
+    return h;
+  }
+  function renderRank(){
+    if(!RK.rows) return;
+    const hasCal=RK.rows.some(r=>'calDays' in r), hedge=RK.snap.hedge;
+    if(RK.sort==='days'&&hasCal) RK.sort='calDays';
+    if(RK.sort==='calDays'&&!hasCal) RK.sort='days';
+    const rows=Rank.filterRows(RK.rows,curFilter());
+    const sorted=Rank.markTies(Rank.sortRows(rows,RK.sort,RK.dir),RK.sort);
+    const cols=rankCols(hasCal,hedge);
+    const dirNow=RK.dir||(RK.sort==='days'||RK.sort==='calDays'?'asc':'desc');
+    let t='<thead><tr>'+cols.map(([c,l])=>{
+      if(!c.startsWith('k:')) return `<th class="static">${l}</th>`;
+      const k=c.slice(2), on=RK.sort===k;
+      return `<th aria-sort="${on?(dirNow==='asc'?'ascending':'descending'):'none'}"><button type="button" class="sort" data-k="${k}">${l}${on?(dirNow==='asc'?' ▲':' ▼'):''}</button></th>`;
+    }).join('')+'</tr></thead><tbody>';
+    let place=0;
+    for(const r of sorted){
+      const ok=!r.notTradable&&!r.error&&r.net!==null;
+      if(ok) place++;
+      const o=OFFER_BY[r.id];
+      const feeSub=typeof r.feesMean==='number'&&Math.abs(r.feesMean-r.fee)>0.005?`<span class="sub">Ø gezahlt ${fee$(r.feesMean)}</span>`:'';
+      const days=ok&&(hasCal?r.calDays:r.days)!==null
+        ? (hasCal?`${fmtFee.format(Math.round(r.calDays*10)/10)}<span class="sub">${r.days===null?'–':fmtFee.format(Math.round(r.days*10)/10)} Handelstage</span>`:`${fmtFee.format(Math.round(r.days*10)/10)}<span class="sub">Handelstage</span>`)
+        : '–';
+      const cell=(v,f)=>ok&&v!==null?f(v):'–';
+      t+=`<tr class="clk${ok?'':' nt'}" data-id="${r.id}" tabindex="0" title="In die Hauptsimulation übernehmen">`
+        +`<td>${ok?place:'–'}</td><td class="txt firm">${r.firm}</td><td class="txt offer">${o?o.n:r.name}<span class="sub">${r.market} · ${r.type==='instant'?'Instant':'Challenge'}${r.size?' · '+fmt0.format(r.size/1000)+'k':''}</span></td>`
+        +`<td>${fee$(r.fee)}${feeSub}</td>`
+        +`<td class="${ok?(r.net>=0?'pos':'neg'):''}">${ok?`${sgn(r.net)}<span class="sub">± ${usd(r.netHalf)}${hedge?` · mit Gegentrade ${sgn(r.netHe)}`:''}</span>`:'–'}</td>`
+        +`<td>${cell(r.roi,pct0)}</td><td>${cell(r.netPer1k,sgn)}</td>`
+        +`<td>${ok&&r.pass!==null?pct(r.pass):'–'}</td><td>${cell(r.payout,pct)}<span class="sub">${ok?'Ø '+fmtFee.format(Math.round(r.avgPayouts*100)/100)+' Ausz.':''}</span></td>`
+        +`<td>${days}</td>`
+        +(hedge?`<td class="${ok&&r.q5NetHe<0?'neg':''}">${cell(r.q5NetHe,sgn)}</td>`:'')
+        +`<td class="txt marks">${marks(r)}</td></tr>`;
+    }
+    if(!sorted.length) t+=`<tr><td colspan="${cols.length}" class="txt note">Keine Angebote in diesem Filter.</td></tr>`;
+    $('rankTbl').innerHTML=t+'</tbody>';
+    $('rankWrap').hidden=false;
+    $('rankCount').textContent=`${fmt0.format(sorted.length)} von ${fmt0.format(RK.rows.length)} Angeboten${RK.aborted?` (abgebrochen, ${fmt0.format(ALL_OFFERS-RK.rows.length)} nicht berechnet)`:''}. Seed ${RK.snap.seed}, ${fmt0.format(RK.snap.n)} Accounts je Angebot${hedge?'':', ohne Gegentrade'}.`;
+  }
+  // Klick: Angebot mit dem Schnappschuss der Berechnung übernehmen (Strategie, n, Gegentrade, Seed), dann zu den Kennzahlen
+  function rankPick(id){
+    const s=RK.snap; if(!s||!OFFER_BY[id]) return;
+    applyStrat(s.strat); seed=s.seed;
+    $('offer').value=id; setPressed('');
+    applyOffer(id,s.strat); render(); checkStale();
+    document.querySelector('.kpis').scrollIntoView({behavior:'smooth',block:'start'});
+  }
+  $('rankGo').addEventListener('click',rankRun);
+  $('rankStop').addEventListener('click',rankStop);
+  $('rankTbl').addEventListener('click',e=>{
+    const b=e.target.closest('button[data-k]');
+    if(b){ const k=b.dataset.k; if(RK.sort===k){ const cur=RK.dir||(k==='days'||k==='calDays'?'asc':'desc'); RK.dir=cur==='asc'?'desc':'asc'; } else { RK.sort=k; RK.dir=undefined; } renderRank(); return; }
+    const tr=e.target.closest('tr[data-id]'); if(tr) rankPick(tr.dataset.id);
+  });
+  $('rankTbl').addEventListener('keydown',e=>{ const tr=e.target.closest('tr[data-id]'); if(tr&&(e.key==='Enter'||e.key===' ')){ e.preventDefault(); rankPick(tr.dataset.id); } });
+  ['fMarkt','fFirma','fTyp','fFee','fSizeMin','fSizeMax'].forEach(id=>$(id).addEventListener('input',renderRank));
+  ['rankN','rankHedge'].forEach(id=>$(id).addEventListener('input',checkStale));
+  $('ctl').addEventListener('input',checkStale); $('ctl').addEventListener('change',checkStale);
+
+  apply(PRESETS.futures); render(); riskHint();
 })();

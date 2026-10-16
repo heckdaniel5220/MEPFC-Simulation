@@ -6,7 +6,12 @@
 
   // Felder mit eigenem Eingabeelement in der Oberfläche. Was hier steht, gewinnt gegen das Angebot.
   const UI_KEYS=['mode','hfund','ddStatic','fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n',
-    'tradesPerDay','dllCompliant','consCompliant'];
+    'tradesPerDay','dllCompliant','consCompliant','daysCompliant'];
+  // Zahlenfelder mit Regler (Reihenfolge wie in der Oberfläche) und Schalter, die apply(P) schreibt und uiVals() zurückliest
+  const NUM_KEYS=['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
+  const FLAG_KEYS=['hfund','ddStatic','dllCompliant','consCompliant','daysCompliant'];
+  // Strategie: was applyOffer und die Rangliste aus der Oberfläche an autoParams geben
+  const STRAT_KEYS=['wr','rr','tradesPerDay','dllCompliant','consCompliant','daysCompliant','hfund'];
   // Steuerfelder der Oberfläche, die nur die Berechnung lenken und nicht in P landen
   const CTRL_KEYS=['riskPct','costPct','autorisk'];
   // Angebotsfelder, die bewusst auf ein UI-Feld abgebildet werden
@@ -76,6 +81,33 @@
     return P;
   }
 
-  const api={autoParams,dllMin,calibHp,UI_KEYS,CTRL_KEYS,CORE_KEYS,DEF};
+  /* Strategie aus UI-Werten (M-015b). u: wr, rr, tradesPerDay, Regeltreue-Schalter, hfund, n, riskPct, costPct, autorisk, risk, cost.
+     opts.n überschreibt n (Rangliste: Accounts je Angebot), opts.hedge === false setzt den Gegentrade auf 0 statt je Angebot zu kalibrieren.
+     applyOffer und die Rangliste benutzen dieselbe Funktion, damit der Klick auf eine Ranglisten-Zeile dasselbe P ergibt. */
+  function stratFromUi(u, opts){
+    opts=opts||{};
+    const s={};
+    for(const k of STRAT_KEYS) if(u[k]!==undefined) s[k]=u[k];
+    s.n=opts.n!==undefined?opts.n:u.n;
+    s.riskPct=u.riskPct??DEF.riskPct; s.costPct=u.costPct??DEF.costPct; s.autorisk=u.autorisk!==false;
+    if(!s.autorisk){ s.risk=u.risk; s.cost=u.cost; }
+    if(opts.hedge===false) s.hp=0;
+    return s;
+  }
+
+  // Was die Oberfläche nach apply(P) in ihren Feldern hält und uiVals() zurückliest (Zahlenfeld als Text, Anzahlen ganz)
+  const num=s=>parseFloat(String(s).replace(',','.'));
+  function uiFromP(P){
+    const u={mode:P.mode,tradesPerDay:Math.max(1,Math.round(P.tradesPerDay||1))};
+    for(const k of FLAG_KEYS) u[k]=k==='hfund'||k==='ddStatic'?!!P[k]:P[k]!==false;
+    for(const k of NUM_KEYS){
+      let x=num(P[k]!==undefined?P[k]:(k==='target2'?0:NaN));
+      if(k==='n'||k==='maxp') x=Math.max(1,Math.round(x));
+      u[k]=x;
+    }
+    return u;
+  }
+
+  const api={autoParams,dllMin,calibHp,stratFromUi,uiFromP,UI_KEYS,CTRL_KEYS,CORE_KEYS,NUM_KEYS,FLAG_KEYS,STRAT_KEYS,DEF};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchParams=api;
 })(typeof self!=='undefined'?self:this);
