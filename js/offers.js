@@ -1,6 +1,6 @@
 /* Glitch-Simulator – Daten: Szenario-Buttons (PRESETS) und Challenge-Angebote (OFFERS).
-   Stand der Angebote: 15.10.2026. Fee = Preis mit aktuellem Rabattcode, ohne belegten Code der Listenpreis.
-   Alpha Futures und Lucid: pro Eintrag src (Quelle), asof (Stand) und rules (Rohregeln).
+   Stand der Angebote: 15.10.2026 (Alpha Capital 16.10.2026). Fee = Preis mit aktuellem Rabattcode, ohne belegten Code der Listenpreis.
+   Alpha Futures, Lucid, MFFU, FundedNext und Alpha Capital: pro Eintrag src (Quelle), asof (Stand) und rules (Rohregeln).
    Quellen und offene Punkte: siehe CLAUDE.md. */
 (function(root){
   'use strict';
@@ -13,8 +13,6 @@
   };
 
   // ---- Alle recherchierten Challenge-Angebote (Fee = Preis mit aktuellem Code) ----
-  const AC = (size,fee,list,code)=>({mode:'instant',fee,list,code,maxRisk:size*0.01,target:0,target2:0,dd:size*0.05,ddStatic:false,buf:size*0.03,minp:size*0.01,wfrac:100,cap:100000,split:90,maxp:5,
-    note:'Ohne Challenge. Daily Loss 3 %, max. 1 % offenes Risiko pro Asset, 15 % Best-Day-Regel, kein Wochenende, Gegentrades verboten.'});
   // ---- Alpha Futures: offizielle Regeln aus help.alpha-futures.com (Artikel Juli/Aug. 2026), Stand 15.10.2026 ----
   // rules = Rohregeln (null = Regel gilt nicht), der Kern liest sie noch nicht. Abbildung auf Kernfelder: siehe CLAUDE.md.
   const AF_SRC={
@@ -230,23 +228,66 @@
       target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:x.cap,split:k.split,maxp:5,
       src:FN_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
   };
+  // ---- Alpha Capital (CFD): Regeln aus help.alphacapitalgroup.uk (Artikel Juli/Aug. 2026), Preise Checkout-Datensatz /api/v3/challenges/ (Mitschnitt 16.10.2026) ----
+  // fee = Codepreis (rules.codePrice), rules.price = Listenpreis. Codes laut alphacapitalgroup.uk/alpha-capital-discount-codes (Stand 14.10.2026). Abbildung: siehe CLAUDE.md.
+  const AC_SRC={
+    d:'https://help.alphacapitalgroup.uk/en/articles/16003693-alpha-direct',
+    one:'https://help.alphacapitalgroup.uk/en/articles/10097421-alpha-one-6-10-12',
+    pro6:'https://help.alphacapitalgroup.uk/en/articles/11378706-alpha-pro-6'};
+  // Plan, Größe, Liste, Codepreis, Ziel P1, Ziel P2, Max. DD, Tages-DD, Lot-Limit, Preis 90 %-Add-On, Bi-Weekly-Preis
+  const AC_ROWS=[
+    ['d',2500,30,18.00,null,null,125,75,1.25,null,null],
+    ['d',5000,67,40.20,null,null,250,150,2.5,null,null],
+    ['d',10000,97,58.20,null,null,500,300,5,null,null],
+    ['d',25000,197,118.20,null,null,1250,750,10,null,null],
+    ['d',50000,257,154.20,null,null,2500,1500,20,null,null],
+    ['d',100000,457,274.20,null,null,5000,3000,40,null,null],
+    ['d',200000,897,538.20,null,null,10000,6000,80,null,null],
+    ['one',5000,47,37.60,500,null,300,200,2.5,52,null],
+    ['one',10000,87,69.60,1000,null,600,400,5,96,null],
+    ['one',25000,187,149.60,2500,null,1500,1000,10,206,null],
+    ['one',50000,277,221.60,5000,null,3000,2000,20,305,null],
+    ['one',100000,477,381.60,10000,null,6000,4000,40,525,null],
+    ['one',200000,947,757.60,20000,null,12000,8000,80,1042,null],
+    ['pro6',5000,27,21.60,300,300,300,150,2.5,30,30],
+    ['pro6',10000,47,37.60,600,600,600,300,5,52,55],
+    ['pro6',25000,117,93.60,1500,1500,1500,750,10,129,127],
+    ['pro6',50000,217,173.60,3000,3000,3000,1500,20,239,227],
+    ['pro6',100000,397,317.60,6000,6000,6000,3000,40,437,427],
+    ['pro6',200000,797,637.60,12000,12000,12000,6000,80,877,847]
+  ];
+  const AC = ([plan,size,price,codePrice,goal1,goal2,mll,dailyDd,lotLimit,ninety,biWeekly])=>{
+    const direct=plan==='d', pro=plan==='pro6';
+    const fmt=v=>v.toLocaleString('de-DE'), eur=v=>v.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const maxRiskPct=direct?1:(size<=25000?3:2), code=direct?'FUNDED40':'ALPHA20', k=size/1000;
+    const r={size,price,codePrice,codeValidUntil:'2026-10-31',priceNinety:ninety,priceBiWeekly:pro?biWeekly:null,target1:goal1,target2:goal2,
+      mll,mllType:pro?'static':'trailing-hwm-lock-start',dailyDd,dailyDdBase:'max(eod-balance,equity)',minDays:direct?null:(pro?3:1),
+      bestDayPct:direct?15:40,payoutMinPct:direct?1:2,bufferPct:direct?3:null,minProfitDays:direct?7:null,maxRiskPct,lotLimit,
+      weekendFunded:plan==='one',eas:direct?false:null,billing:'once'};
+    let n, regeln;
+    if(direct){
+      n=`Direct ${fmt(k)}k`;
+      regeln=`Ohne Challenge. Max. DD 5 % trailing (HWM Balance), lockt bei Start. Tages-DD ${fmt(dailyDd)} $. Auszahlung: zuerst Puffer 3 % (${fmt(size*0.03)} $), darüber min. 1 % brutto; bester Tag ≤ 15 % des Gewinns, Teilauszahlung setzt das Fenster zurück; 7 Gewinntage laut Datensatz${size===100000?' (Datensatz 0, konservativ 7)':''}. Max. 1 % offenes Risiko pro Asset ab dem ersten Trade (Hard Breach). Kein Wochenend-Halten, keine EAs, kein Scaling.`;
+    } else if(plan==='one'){
+      n=`Alpha One 10 % ${fmt(k)}k (1-Step)`;
+      regeln=`Ziel 10 % (${fmt(goal1)} $), min. 1 Tag. Max. DD 6 % trailing (HWM Balance), lockt bei Start. Tages-DD 4 % (${fmt(dailyDd)} $). Max_Loss im Datensatz 10 %, Help-Center 6 % → 6 %. Auszahlung on demand: bester Tag ≤ 40 %, min. 2 % brutto. Vollabhebung nach Lock schließt den Account (Kern ignoriert). Wochenende erlaubt. 90 %-Add-On ${fmt(ninety)} $ (nur Notiz).`;
+    } else {
+      n=`Alpha Pro 6 % ${fmt(k)}k (2-Step)`;
+      regeln=`Ziel je Phase 6 % (${fmt(goal1)} $), min. 3 Tage je Phase. Max. DD 6 % statisch, Tages-DD 3 % (${fmt(dailyDd)} $). Preis = On-Demand; Bi-Weekly ${fmt(biWeekly)} $, 90 %-Add-On ${fmt(ninety)} $ (nur Notiz). Auszahlung on demand: bester Tag ≤ 40 %, min. 2 % brutto. Kein Wochenend-Halten im Qualified.`;
+    }
+    const allg=`${direct?'':`Max. ${maxRiskPct} % offenes Risiko pro Asset (Hard Breach, nur Qualified, Käufe ab 21.07.2026). `}Tages-DD gemessen am höheren Wert aus EOD-Balance und Equity. News-Sperre ±5 Min. auf dem betroffenen Instrument. Lot-Limit ${fmt(lotLimit)}. Einmalgebühr, Liste ${fmt(price)} $, ${code}-Preis ${eur(codePrice)} $. Code bis 31.10.2026; danach Listenpreis (Abgleich). Gegentrades verboten.`;
+    const annahmen=`Annahmen: Best-Day-Regel und Tages-DD noch nicht im Kern (M-002/M-003). cap 100.000 $ = kein Cap. maxp 5 Konvention.${direct?' buf 3 %, minp 1 % der Kontogröße.':' minp = 2 % der Kontogröße.'}`;
+    return {id:`ac-${plan}-${size===2500?'2.5':k}`,n,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code,
+      maxRisk:size*maxRiskPct/100,target:direct?0:goal1,target2:pro?goal2:0,dd:mll,...(pro?{ddStatic:true}:{}),
+      buf:direct?size*0.03:0,minp:size*(direct?0.01:0.02),wfrac:100,cap:100000,split:direct?90:80,maxp:5,
+      src:AC_SRC[plan],asof:'2026-10-16',rules:r,note:`${regeln} ${allg} ${annahmen}`};
+  };
   const OFFERS=[
     {g:'Alpha Futures · CME-Futures · Eval monatlich, Direct einmalig', items:AF_ROWS.map(AF)},
     {g:'Lucid Trading · Futures · einmalig', items:LU_ROWS.map(LU)},
     {g:'MyFundedFutures · Futures · einmalig', items:MF_ROWS.map(MF)},
     {g:'FundedNext Futures · einmalig', items:FN_ROWS.map(FN)},
-    {g:'Alpha Capital · CFD (NAS100, Gold) · einmalig', items:[
-      Object.assign({id:'ac-d-2.5',n:'Direct 2,5k'},AC(2500,30,'30 $','–')),
-      Object.assign({id:'ac-d-5',n:'Direct 5k'},AC(5000,67,'67 $','–')),
-      Object.assign({id:'ac-d-10',n:'Direct 10k'},AC(10000,97,'97 $','–')),
-      Object.assign({id:'ac-d-25',n:'Direct 25k'},AC(25000,197,'197 $','–')),
-      Object.assign({id:'ac-d-50',n:'Direct 50k'},AC(50000,97,'257 $','50KFOR97 (bis 31.10.)')),
-      Object.assign({id:'ac-d-100',n:'Direct 100k'},AC(100000,197,'457 $','100KFOR197 (bis 31.10.)')),
-      Object.assign({id:'ac-d-200',n:'Direct 200k'},AC(200000,897,'897 $','–')),
-      {id:'ac-one-50',n:'Alpha One 50k (1-Step)',mode:'challenge',fee:178,list:'297 $',code:'SMS40 (bis 31.10.)',target:5000,target2:0,dd:3000,ddStatic:false,buf:0,minp:1000,wfrac:100,cap:100000,split:80,maxp:5,note:'Daily Loss 4 %, Drawdown 6 % trailing bis Breakeven. On-Demand-Payout ab 2 % Gewinn, 40 % Best Day.'},
-      {id:'ac-pro6-50',n:'Alpha Pro 6 % 50k (2-Step)',mode:'challenge',fee:142,list:'237 $',code:'SMS40 (bis 31.10.)',target:3000,target2:3000,dd:3000,ddStatic:true,buf:0,minp:100,wfrac:100,cap:100000,split:80,maxp:5,note:'Statischer Drawdown 6 %, Daily Loss 3 %. Bi-weekly ab 100 $ und 5 Handelstagen. Funded kein Wochenende.'},
-      {id:'ac-pro10-50',n:'Alpha Pro 10 % 50k (2-Step)',mode:'challenge',fee:178,list:'297 $',code:'SMS40 (bis 31.10.)',target:5000,target2:2500,dd:5000,ddStatic:true,buf:0,minp:100,wfrac:100,cap:100000,split:80,maxp:5,note:'Statischer Drawdown 10 %, Daily Loss 5 %. Bi-weekly ab 100 $ und 5 Handelstagen. Funded kein Wochenende.'}
-    ]}
+    {g:'Alpha Capital · CFD (NAS100, Gold) · einmalig', items:AC_ROWS.map(AC)}
   ];
 
   const api={PRESETS,OFFERS};
