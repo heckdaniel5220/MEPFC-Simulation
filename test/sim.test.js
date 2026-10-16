@@ -231,9 +231,8 @@ test('alle ids eindeutig, keine FundedNext-Legacy-ids mehr', () => {
 // ---- Alpha-Capital-Katalog (M-010e) ----
 const AC = OFFERS.find(gr => gr.g.startsWith('Alpha Capital')).items;
 
-test('Alpha Capital hat 19 Einträge, insgesamt 69 Angebote (66 + 3 Rapid Daily)', () => {
+test('Alpha Capital hat 19 Einträge', () => {
   assert.strictEqual(AC.length, 19);
-  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 69);
 });
 
 test('Alpha Capital: src, asof, rules, code und codeValidUntil je Eintrag', () => {
@@ -268,6 +267,77 @@ test('alle ids eindeutig, keine Pro-10-%-ids mehr', () => {
   const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
   assert.strictEqual(new Set(ids).size, ids.length);
   assert.ok(!ids.some(id => id.startsWith('ac-pro10')), 'Pro 10 % vorhanden');
+});
+
+// ---- Blue-Guardian-Katalog (M-010g) ----
+const BGC = OFFERS.find(gr => gr.g === 'Blue Guardian · CFD').items;
+const BGF = OFFERS.find(gr => gr.g === 'Blue Guardian · Futures').items;
+
+test('Blue Guardian hat 46 Einträge (30 CFD + 16 Futures), insgesamt 115 Angebote', () => {
+  assert.strictEqual(BGC.length, 30);
+  assert.strictEqual(BGF.length, 16);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 115);
+  const plans = xs => [...new Set(xs.map(o => o.id.replace(/-[\d.]+$/, '')))];
+  assert.deepStrictEqual(plans(BGC), ['bg-cfd-instant', 'bg-cfd-1step', 'bg-cfd-2step', 'bg-cfd-1step-nano', 'bg-cfd-2step-nano']);
+  assert.deepStrictEqual(plans(BGF), ['bg-fut-std', 'bg-fut-express', 'bg-fut-reserve', 'bg-fut-direct']);
+});
+
+test('Blue Guardian: src, asof, rules, Code HALLOWEEN ohne Ablaufdatum, fee = Website-Preis', () => {
+  for (const o of [...BGC, ...BGF]) {
+    assert.ok(/^https:\/\/(help\.)?blueguardian\.com/.test(o.src), o.id + ' src');
+    assert.strictEqual(o.asof, '2026-10-16', o.id + ' asof');
+    assert.strictEqual(o.code, 'HALLOWEEN', o.id + ' code');
+    assert.strictEqual(o.rules.codeValidUntil, null, o.id + ' codeValidUntil');
+    assert.strictEqual(o.fee, o.rules.codePrice, o.id + ' fee');
+    assert.ok(o.rules.codePrice < o.rules.price, o.id + ' Rabatt');
+    assert.strictEqual(o.dd, o.rules.mll, o.id + ' dd');
+    assert.strictEqual(o.wfrac, 100, o.id + ' wfrac');
+    assert.strictEqual(o.maxp, 5, o.id + ' maxp');
+  }
+});
+
+test('Blue Guardian CFD: DLL hart, split × 0,97, maxRisk = Guardian Shield, buf und ddStatic', () => {
+  for (const o of BGC) {
+    const r = o.rules, inst = o.id.startsWith('bg-cfd-instant-'), stat = /-2step(-nano)?-/.test(o.id);
+    assert.strictEqual(o.dllType, 'hard', o.id + ' dllType');
+    assert.strictEqual(o.dllFunded, r.dailyDd, o.id + ' dllFunded');
+    assert.strictEqual(o.dllEval, inst ? 0 : r.dailyDd, o.id + ' dllEval');
+    assert.strictEqual(o.split, Math.round(r.splitNominal * 0.97 * 100) / 100, o.id + ' split');
+    assert.ok([77.6, 82.45].includes(o.split), o.id + ' split-Wert');
+    assert.strictEqual(o.maxRisk, r.size * (inst ? 0.01 : 0.02), o.id + ' maxRisk');
+    assert.strictEqual(!!o.ddStatic, stat, o.id + ' ddStatic');
+    assert.strictEqual(o.buf, stat ? 0 : r.size * 0.01, o.id + ' buf');
+    assert.strictEqual(o.mode, inst ? 'instant' : 'challenge', o.id + ' mode');
+    if (/-2step/.test(o.id)) assert.ok(o.target2 > 0, o.id + ' target2'); else assert.strictEqual(o.target2, 0, o.id + ' target2');
+  }
+  const by = id => BGC.find(o => o.id === id);
+  assert.strictEqual(by('bg-cfd-instant-100').consFunded, 20);
+  assert.strictEqual(by('bg-cfd-instant-300').consFunded, 15);
+  assert.strictEqual(by('bg-cfd-instant-200').cap, 10000);
+  assert.strictEqual(by('bg-cfd-instant-100').minp, 2500);
+  assert.strictEqual(by('bg-cfd-1step-nano-100').consEval, 50);
+  assert.strictEqual(by('bg-cfd-2step-nano-100').cap, 2000);
+  assert.strictEqual(by('bg-cfd-2step-nano-100').consEval, 0);
+});
+
+test('Blue Guardian Futures: DLL soft, Consistency, buf, minp, cap je Plan', () => {
+  for (const o of BGF) {
+    const r = o.rules;
+    assert.strictEqual(o.dllType, 'soft', o.id + ' dllType');
+    assert.strictEqual(o.split, 90, o.id + ' split');
+    assert.strictEqual(o.maxRisk, undefined, o.id + ' maxRisk');
+    assert.ok(!o.ddStatic, o.id + ' ddStatic');
+    if (o.id.startsWith('bg-fut-std-')) { assert.strictEqual(o.buf, o.dd + 100, o.id); assert.strictEqual(o.cap, r.payoutCap1, o.id); assert.strictEqual(o.consFunded, 40, o.id); }
+    if (o.id.startsWith('bg-fut-express-')) { assert.strictEqual(o.buf, r.buffer, o.id); assert.strictEqual(o.cap, r.dailyPayoutMax, o.id); assert.strictEqual(o.dd, r.mllFunded, o.id); assert.strictEqual(o.consEval, 40, o.id); }
+    if (o.id.startsWith('bg-fut-reserve-')) { assert.strictEqual(o.buf, 100, o.id); assert.strictEqual(o.minp, Math.max(100, 5 * r.winDayMin), o.id); assert.strictEqual(o.consEval, 40, o.id); }
+    if (o.id.startsWith('bg-fut-direct-')) { assert.strictEqual(o.mode, 'instant', o.id); assert.strictEqual(o.target, 0, o.id); assert.strictEqual(o.minp, r.cycleTarget1, o.id); assert.strictEqual(o.consFunded, 20, o.id); }
+    else assert.strictEqual(o.mode, 'challenge', o.id);
+  }
+});
+
+test('alle ids eindeutig (mit Blue Guardian)', () => {
+  const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
+  assert.strictEqual(new Set(ids).size, ids.length);
 });
 
 // ---- Handelstage (M-001) ----
@@ -547,7 +617,7 @@ test('M-002 Validierung: negative Werte, dllType, dllCompliant, risk + cost ≥ 
   assert.deepStrictEqual([P.dllEval, P.dllFunded, P.dllType, P.dllScaleFunded, P.dllScaleFrom, P.dllCompliant], [0, 0, 'soft', 0, 0, true]);
 });
 
-test('M-002 Daten: DLL-Kernfelder passen zu rules, 52 Angebote mit DLL', () => {
+test('M-002 Daten: DLL-Kernfelder passen zu rules, 97 Angebote mit DLL (52 + 45 Blue Guardian)', () => {
   let n = 0;
   for (const o of ALL) {
     const r = o.rules || {};
@@ -556,7 +626,7 @@ test('M-002 Daten: DLL-Kernfelder passen zu rules, 52 Angebote mit DLL', () => {
     assert.strictEqual(o.dllFunded, r.dlgFunded ?? r.dailyDd ?? 0, o.id);
     if (r.dlgEval != null && o.mode !== 'instant') assert.ok(o.dllEval > 0, o.id);
     if (r.dlgFunded != null || r.dailyDd != null) assert.ok(o.dllFunded > 0, o.id);
-    assert.strictEqual(o.dllType, o.id.startsWith('ac-') ? 'hard' : 'soft', o.id);
+    assert.strictEqual(o.dllType, /^(ac-|bg-cfd-)/.test(o.id) ? 'hard' : 'soft', o.id);
     if (o.dllScaleFunded > 0) {
       assert.ok(o.id.startsWith('lu-') && r.dlgScaleFunded === 0.6, o.id);
       assert.strictEqual(o.dllScaleFrom, r.trailBalance - Number(o.id.split('-').pop()) * 1000, o.id);
@@ -565,7 +635,7 @@ test('M-002 Daten: DLL-Kernfelder passen zu rules, 52 Angebote mit DLL', () => {
     if (o.dllEval > 0 || o.dllFunded > 0) n++;
     assert.doesNotThrow(() => offerP(o, withDll(o)), o.id);
   }
-  assert.strictEqual(n, 52);
+  assert.strictEqual(n, 97);
   assert.strictEqual(ALL.filter(o => o.dllScaleFunded > 0).length, 7);
   for (const p of Object.values(PRESETS)) for (const k of DLL_KEYS) assert.ok(!(k in p));
 });
@@ -682,7 +752,8 @@ test('M-003 consTargetFails: erreichtes Ziel, danach gescheitert (1-Step)', () =
 });
 
 test('M-003 Daten: Consistency-Kernfelder passen zu rules, Anzahl je Anbieter', () => {
-  const CNT = { 'Alpha Futures': [13, 6, 10], 'Lucid': [16, 8, 8], 'MyFundedFutures': [11, 7, 4], 'FundedNext': [7, 3, 4], 'Alpha Capital': [19, 0, 19] };
+  const CNT = { 'Alpha Futures': [13, 6, 10], 'Lucid': [16, 8, 8], 'MyFundedFutures': [11, 7, 4], 'FundedNext': [7, 3, 4], 'Alpha Capital': [19, 0, 19],
+    'Blue Guardian · CFD': [18, 6, 18], 'Blue Guardian · Futures': [16, 8, 8] };
   for (const gr of OFFERS) {
     const key = Object.keys(CNT).find(k => gr.g.startsWith(k)); assert.ok(key, gr.g);
     let any = 0, ev = 0, fu = 0;
