@@ -215,7 +215,8 @@
       res.cumNo.push(cNo); res.cumHe.push(cHe); res.cumReal.push(real);
       if(detail) res.accts.push(a);
       // Kompakte Zeile je Account (alle n): Ergebnis 'fail' (Challenge verloren), 'pass' (ohne Auszahlung), 'paid' (≥ 1 Auszahlung)
-      res.list.push({i,res:!a.passed?'fail':a.nPay>0?'paid':'pass',trades:a.trades,days:day,nPay:a.nPay,pay:a.pay,hedge:a.hedge,netNo:a.netNo,netHe:a.netHe});
+      // daysToFirstPay: Tagesnummer der 1. Auszahlung ab Account-Start (inkl. Challenge), ohne Auszahlung null
+      res.list.push({i,res:!a.passed?'fail':a.nPay>0?'paid':'pass',trades:a.trades,days:day,daysToFirstPay:a.phases.funded?a.phases.funded.firstPayDay:null,nPay:a.nPay,pay:a.pay,hedge:a.hedge,netNo:a.netNo,netHe:a.netHe});
     }
     res.real=real; res.netNo=cNo; res.netHe=cHe;
     // Mittelwerte je Phase nur über Accounts, die die Phase erreicht haben (sonst null)

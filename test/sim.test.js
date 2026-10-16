@@ -349,7 +349,7 @@ const GOLD = { // Seed 20261015, n = 2000, Stand main 2219cb7
 const kpi = (R, n) => [(R.netNo / n).toFixed(6), (R.netHe / n).toFixed(6), (R.passed / n).toFixed(4), (R.paid / n).toFixed(4)].map(Number);
 // Ergebnis ohne die neuen Tagesfelder, für den Vergleich verschiedener tradesPerDay
 const core = R => JSON.stringify({ ...R, days: 0, medianDaysToPass: 0,
-  accts: R.accts.map(a => ({ ...a, phases: 0 })), list: (R.list || []).map(x => ({ ...x, days: 0 })) });
+  accts: R.accts.map(a => ({ ...a, phases: 0 })), list: (R.list || []).map(x => ({ ...x, days: 0, daysToFirstPay: 0 })) });
 // Deterministischer Trade: p = 1 (immer Gewinn) bzw. p = 0 (immer Verlust)
 const det = (over) => prepare({ mode: 'challenge', fee: 100, target: 1000, target2: 0, dd: 2000, risk: 100, rr: 2, wr: 100,
   cost: 10, hp: 5, hfund: false, buf: 0, minp: 300, wfrac: 100, cap: 100000, split: 90, maxp: 3, n: 20, ...over });
@@ -892,6 +892,8 @@ test('M-004 Zusammenspiel: Consistency und Tage müssen beide erfüllt sein', ()
   const f = fundD({ consFunded: 40, payMinDays: 7 }).accts[0].phases.funded;
   assert.deepStrictEqual([c.firstPayDay, d.firstPayDay, f.firstPayDay], [5, 7, 7]);
   assert.deepStrictEqual([c.daysBlocks, d.consBlocks], [0, 0]);
+  // Tage mit beiden Blockaden zählen nur als consBlocks: gleich viele consBlocks wie mit Consistency allein
+  assert.strictEqual(f.consBlocks, c.consBlocks);
   // daysBlocks nur an Tagen, an denen die Consistency erfüllt war (Tag 5–6 und 12–13)
   assert.deepStrictEqual([f.consBlocks, f.daysBlocks, f.days], [8, 4, 14]);
 });
@@ -949,6 +951,52 @@ test('M-004 Daten: Tage-Regeln aus rules, Prozent-Schwellen in $, minp = echte M
   assert.deepStrictEqual(['af-zero-50', 'af-std-50', 'af-adv-50', 'lu-flex-150', 'fn-flex-50', 'bg-cfd-instant-400', 'bg-cfd-1step-nano-200', 'bg-fut-reserve-50'].map(minp),
     [400, 1000, 2000, 1000, 500, 100, 100, 100]);
   for (const p of Object.values(PRESETS)) for (const k of DAYS_KEYS) assert.ok(!(k in p));
+});
+
+test('M-004 Instant ignoriert Eval-Tage', () => {
+  for (const tpd of [1, 3]) {
+    const R = simulate(prepare({ ...PRESETS.instant, n: 500, tradesPerDay: tpd }), SEED);
+    const E = simulate(prepare({ ...PRESETS.instant, n: 500, tradesPerDay: tpd, evalMinDays: 5, evalWinDays: 3, evalWinDayMin: 100000 }), SEED);
+    assert.strictEqual(JSON.stringify(E), JSON.stringify(R), 'tpd ' + tpd);
+  }
+  // Instant-Angebote tragen keine Eval-Tage (Lucid Direct: nur Funded)
+  assert.deepStrictEqual([byId('lu-direct-50').evalMinDays, byId('lu-direct-50').payMinDays], [0, 5]);
+});
+
+test('M-004 R.list: daysToFirstPay je Account, Mittel = days.funded.daysToFirstPay', () => {
+  for (const k of Object.keys(PRESETS)) for (const over of [{}, { tradesPerDay: 3, payWinDays: 2, payWinDayMin: 100 }]) {
+    const R = simulate(prepare({ ...PRESETS[k], n: 2000, ...over }), SEED);
+    const xs = R.list.filter(x => x.nPay > 0).map(x => x.daysToFirstPay);
+    assert.ok(xs.every(v => Number.isInteger(v) && v >= 1), k);
+    assert.ok(R.list.filter(x => x.nPay === 0).every(x => x.daysToFirstPay === null), k);
+    const m = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+    assert.strictEqual(m, R.days.funded.daysToFirstPay, k);
+    // Detail-Accounts: gleich phases.funded.firstPayDay, höchstens Gesamttage
+    R.accts.forEach((a, i) => { assert.strictEqual(R.list[i].daysToFirstPay, a.phases.funded ? a.phases.funded.firstPayDay : null, k);
+      if (R.list[i].daysToFirstPay !== null) assert.ok(R.list[i].daysToFirstPay <= R.list[i].days, k); });
+  }
+});
+
+test('M-004 Daten je Anbieter: Tage-Felder und minp', () => {
+  // id: [evalMinDays, evalWinDays, evalWinDayMin, payMinDays, payWinDays, payWinDayMin, minp]
+  const EXP = {
+    'af-zero-50':           [0, 0, 0,   0, 5, 200, 400],   // Alpha Futures: 200 $ ÷ 50 %
+    'lu-flex-50':           [0, 0, 0,   0, 5, 150, 1000],  // Lucid Flex: 500 $ ÷ 50 %
+    'lu-direct-50':         [0, 0, 0,   5, 0, 0,   3000],  // Lucid Direct: 5 Handelstage, minp = 1. Zyklusziel
+    'mf-builder-100':       [1, 0, 0,   2, 0, 0,   1000],  // MFFU Builder
+    'mf-rapid-50':          [2, 0, 0,   0, 0, 0,   500],   // MFFU Rapid
+    'fn-flex-100':          [0, 0, 0,   0, 5, 200, 500],   // FundedNext Flex: max(500 $; 250 $ ÷ 50 %)
+    'ac-d-100':             [0, 0, 0,   0, 7, 0,   1000],  // Alpha Capital Direct: 7 Tage > 0, minp 1 %
+    'ac-pro6-100':          [3, 0, 0,   0, 0, 0,   2000],  // Alpha Capital Pro 6 %: 3 Handelstage je Phase
+    'bg-cfd-2step-50':      [0, 3, 250, 0, 0, 0,   100],   // Blue Guardian CFD 2 Step: 3 × 0,5 % je Phase
+    'bg-cfd-instant-50':    [0, 0, 0,   0, 5, 250, 100],   // Blue Guardian CFD Instant: 5 × 0,5 %
+    'bg-fut-reserve-100':   [0, 0, 0,   0, 5, 200, 100],   // Blue Guardian Futures Reserve
+    'bg-fut-express-50':    [0, 0, 0,   0, 0, 0,   500],   // Blue Guardian Futures Express: ohne Tage-Regel
+  };
+  for (const [id, e] of Object.entries(EXP)) {
+    const o = byId(id);
+    assert.deepStrictEqual([...DAYS_KEYS.slice(0, 6).map(k => o[k]), o.minp], e, id);
+  }
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
