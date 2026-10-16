@@ -570,4 +570,138 @@ test('M-002 Daten: DLL-Kernfelder passen zu rules, 52 Angebote mit DLL', () => {
   for (const p of Object.values(PRESETS)) for (const k of DLL_KEYS) assert.ok(!(k in p));
 });
 
+// ---- Consistency (M-003) ----
+const CONS_ZERO = { consEval: 0, consFunded: 0, consFundedMode: 'cycle', consCompliant: true };
+// Ergebnis ohne die neuen Consistency-Felder je Phase (consBlocks, bestDay)
+const noCons = R => JSON.stringify({ ...R,
+  days: Object.fromEntries(Object.entries(R.days).map(([k, d]) => [k, { ...d, consBlocks: 0 }])),
+  accts: R.accts.map(a => ({ ...a, phases: Object.fromEntries(Object.entries(a.phases).map(([k, ph]) => [k, ph && { ...ph, consBlocks: 0, bestDay: 0 }])) })) });
+
+test('M-003 Golden: ohne Regel exakt die Baseline (alle 5 Presets, tradesPerDay 1 und 3)', () => {
+  for (const k of Object.keys(PRESETS)) for (const tpd of [1, 3]) {
+    const R = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd }), SEED);
+    const Z = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...CONS_ZERO }), SEED);
+    const F = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...CONS_ZERO, consCompliant: false, consFundedMode: 'perpetual' }), SEED);
+    if (GOLD[k]) assert.deepStrictEqual(kpi(R, 2000), GOLD[k], k + ' tpd ' + tpd);
+    assert.strictEqual(JSON.stringify(Z), JSON.stringify(R), k + ' explizit 0 = Default');
+    assert.strictEqual(noCons(F), noCons(R), k + ' Schalter ohne Regel wirkungslos');
+    for (const ph of ['step1', 'step2', 'funded']) if (R.days[ph].n) assert.strictEqual(R.days[ph].consBlocks, 0, k + ' ' + ph);
+    assert.strictEqual(R.consTargetFails.n, 0, k);
+    if (PRESETS[k].mode === 'challenge') assert.strictEqual(R.consPassDelay, 0, k); else assert.strictEqual(R.consPassDelay, null, k);
+  }
+});
+
+test('M-003 Eval: Ziel erreicht, bester Tag zu groß → kein Bestehen, später Bestehen, consBlocks steigt', () => {
+  // je Trade +190, 3 Trades pro Tag: Tag 2 erreicht 1.140 ≥ 1.000, aber 570 ≥ 40 % × 1.140 → blockiert
+  const base = simulate(det({ tradesPerDay: 3 }), 1).accts[0].phases.step1;
+  assert.deepStrictEqual([base.days, base.consBlocks], [2, 0]);
+  const R = simulate(det({ tradesPerDay: 3, consEval: 40 }), 1), ph = R.accts[0].phases.step1;
+  assert.strictEqual(R.passed, 20);
+  assert.deepStrictEqual(ph.dayPnl, [570, 570, 190, 190], 'regeltreu: Blockade beendet den Tag');
+  assert.deepStrictEqual(ph.bestDay, [570, 570, 570, 570]);
+  assert.strictEqual(ph.consBlocks, 2);
+  assert.strictEqual(R.days.step1.consBlocks, 2);
+  assert.strictEqual(R.consPassDelay, 2);
+  assert.deepStrictEqual(R.consTargetFails, { n: 0, hit: 20, share: 0 });
+  // consCompliant = false: am selben Tag weiter, Bestehen an Tag 3 mit dem 2. Trade
+  const F = simulate(det({ tradesPerDay: 3, consEval: 40, consCompliant: false }), 1), pf = F.accts[0].phases.step1;
+  assert.deepStrictEqual([pf.dayPnl, pf.consBlocks, F.consPassDelay], [[570, 570, 380], 2, 1]);
+});
+
+test('M-003 Eval 2-Step: Regel je Step getrennt, Step 2 startet mit bestem Tag 0', () => {
+  const R = simulate(det({ tradesPerDay: 3, consEval: 40, target2: 1000 }), 1), a = R.accts[0];
+  assert.deepStrictEqual([a.phases.step1.consBlocks, a.phases.step2.consBlocks], [2, 2]);
+  assert.strictEqual(R.consPassDelay, 4, 'Step 1 + Step 2');
+  assert.strictEqual(R.medianDaysToPass, 8);
+  // Zufallskurse: bestDay je Step = laufendes Maximum nur der eigenen Tage
+  const P = prepare({ ...PRESETS.futures, target2: 3000, tradesPerDay: 3, consEval: 40, n: 300 });
+  let reset = false;
+  for (const x of simulate(P, SEED).accts) for (const k of ['step1', 'step2']) {
+    const ph = x.phases[k]; if (!ph) continue;
+    let m = 0; ph.dayPnl.forEach((v, i) => { m = Math.max(m, v); assert.strictEqual(ph.bestDay[i], m, k); });
+    if (k === 'step2' && ph.bestDay[0] < Math.max(...x.phases.step1.bestDay)) reset = true;
+  }
+  assert.ok(reset, 'mindestens ein Step 2 beginnt unter dem besten Tag aus Step 1');
+});
+
+// Instant: Puffer 600, Schwelle 900; je Trade +190, 3 Trades pro Tag, max. 2 Auszahlungen
+const fund = over => simulate(det({ mode: 'instant', target: 0, buf: 600, maxp: 2, tradesPerDay: 3, consFunded: 40, ...over }), 1).accts[0];
+
+test("M-003 Funded 'cycle': Auszahlung blockiert, bis die Regel erfüllt ist, danach Reset", () => {
+  assert.strictEqual(fund({ consFunded: 0 }).phases.funded.days, 3, 'ohne Regel');
+  const a = fund({ consFundedMode: 'cycle' }), ph = a.phases.funded;
+  assert.strictEqual(a.nPay, 2);
+  // 1. Zyklus: Zyklusgewinn inkl. Puffer, Auszahlung an Tag 5 (1.520, 570 < 608); 2. Zyklus ab 600 $, Auszahlung an Tag 10
+  assert.deepStrictEqual(ph.dayPnl, [570, 380, 190, 190, 190, 380, 190, 190, 190, 190]);
+  assert.deepStrictEqual(ph.bestDay, [570, 570, 570, 570, 0, 380, 380, 380, 380, 0]);
+  assert.strictEqual(ph.consBlocks, 7);
+  // consCompliant = false: Blockade beendet den Tag nicht
+  const f = fund({ consFundedMode: 'cycle', consCompliant: false }).phases.funded;
+  assert.ok(f.dayPnl.some((v, i) => v === 570 && i > 0), 'weiter getradet');
+});
+
+test("M-003 Funded 'perpetual': kein Reset, alter großer Tag blockiert auch den 2. Zyklus", () => {
+  const a = fund({ consFundedMode: 'perpetual' }), ph = a.phases.funded;
+  assert.strictEqual(a.nPay, 2);
+  assert.strictEqual(ph.days, 12, '2. Zyklus braucht Zyklusgewinn > 570 ÷ 0,4');
+  assert.ok(ph.bestDay.every(v => v === 570));
+  assert.strictEqual(ph.consBlocks, 9);
+});
+
+test('M-003 strikt: bester Tag = genau X % blockiert', () => {
+  // Tag 2: 570 = 50 % × 1.140 → blockiert, Bestehen an Tag 3; knapp darüber besteht Tag 2
+  const eq = simulate(det({ tradesPerDay: 3, consEval: 50 }), 1).accts[0].phases.step1;
+  assert.deepStrictEqual([eq.days, eq.consBlocks], [3, 1]);
+  const ab = simulate(det({ tradesPerDay: 3, consEval: 50.01 }), 1).accts[0].phases.step1;
+  assert.deepStrictEqual([ab.days, ab.consBlocks], [2, 0]);
+  // Funded: Tag 3 erreicht 1.140, bester Tag 570 = 50 % × 1.140 → blockiert, Auszahlung an Tag 4
+  assert.strictEqual(fund({ consFunded: 50, maxp: 1 }).phases.funded.days, 4);
+  assert.strictEqual(fund({ consFunded: 50.01, maxp: 1 }).phases.funded.days, 3);
+});
+
+test('M-003 Validierung: Werte außerhalb [0, 100], Typ, Mode und consCompliant', () => {
+  const f = PRESETS.futures;
+  for (const k of ['consEval', 'consFunded']) for (const v of [-1, 100.5, NaN, Infinity, '40', null])
+    assert.throws(() => prepare({ ...f, [k]: v }), new RegExp(k), k + ' ' + v);
+  for (const v of ['target', 'perpetual-best-day', '', 1]) assert.throws(() => prepare({ ...f, consFundedMode: v }), /consFundedMode/);
+  for (const v of [1, 'true', null]) assert.throws(() => prepare({ ...f, consCompliant: v }), /consCompliant/);
+  for (const v of [0, 100]) assert.doesNotThrow(() => prepare({ ...f, consEval: v, consFunded: v }));
+  const P = prepare({ ...f });
+  assert.deepStrictEqual([P.consEval, P.consFunded, P.consFundedMode, P.consCompliant], [0, 0, 'cycle', true]);
+  // instant: consEval wirkt nicht
+  const I = { ...PRESETS.instant, n: 300, tradesPerDay: 3 };
+  assert.strictEqual(JSON.stringify(simulate(prepare({ ...I, consEval: 40 }), SEED)), JSON.stringify(simulate(prepare(I), SEED)));
+});
+
+test('M-003 consTargetFails: erreichtes Ziel, danach gescheitert (1-Step)', () => {
+  const R = simulate(prepare({ ...PRESETS.futures, n: 2000, tradesPerDay: 3, consEval: 40 }), SEED);
+  const t = R.consTargetFails;
+  assert.ok(t.n > 0 && t.hit - t.n === R.passed, JSON.stringify(t));
+  assert.strictEqual(t.share, t.n / t.hit);
+  assert.ok(R.consPassDelay > 0 && R.days.step1.consBlocks > 0);
+});
+
+test('M-003 Daten: Consistency-Kernfelder passen zu rules, Anzahl je Anbieter', () => {
+  const CNT = { 'Alpha Futures': [13, 6, 10], 'Lucid': [16, 8, 8], 'MyFundedFutures': [11, 7, 4], 'FundedNext': [7, 3, 4], 'Alpha Capital': [19, 0, 19] };
+  for (const gr of OFFERS) {
+    const key = Object.keys(CNT).find(k => gr.g.startsWith(k)); assert.ok(key, gr.g);
+    let any = 0, ev = 0, fu = 0;
+    for (const o of gr.items) {
+      const r = o.rules || {};
+      assert.strictEqual(o.consEval, r.consEval ?? 0, o.id);
+      assert.strictEqual(o.consFunded, r.consFunded ?? r.bestDayPct ?? 0, o.id);
+      assert.strictEqual(o.consFundedMode, r.consFundedMode === 'perpetual-best-day' ? 'perpetual' : 'cycle', o.id);
+      if (o.mode === 'instant') assert.strictEqual(o.consEval, 0, o.id);
+      assert.ok(!('consCompliant' in o), o.id);
+      if (o.consEval > 0 || o.consFunded > 0) any++;
+      if (o.consEval > 0) ev++;
+      if (o.consFunded > 0) fu++;
+      assert.doesNotThrow(() => offerP(o, { consEval: o.consEval, consFunded: o.consFunded, consFundedMode: o.consFundedMode }), o.id);
+    }
+    assert.deepStrictEqual([any, ev, fu], CNT[key], key);
+  }
+  assert.deepStrictEqual(ALL.filter(o => o.consFundedMode === 'perpetual').map(o => o.id), ['fn-direct-50']);
+  for (const p of Object.values(PRESETS)) for (const k of Object.keys(CONS_ZERO)) assert.ok(!(k in p));
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
