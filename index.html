@@ -120,9 +120,11 @@
       </div>
 
       <div class="panel">
-        <h2>Die ersten 12 Accounts im Detail</h2>
-        <div class="tbl"><table id="trace"></table></div>
-        <p class="note">Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
+        <h2>Alle Accounts</h2>
+        <div class="lfilter" id="lfilter" role="group" aria-label="Accounts filtern"></div>
+        <div class="tbl"><table id="trace" class="list"></table></div>
+        <div class="pager"><button type="button" class="btn" id="lprev">‹ Zurück</button><span id="lpage" class="note" aria-live="polite"></span><button type="button" class="btn" id="lnext">Weiter ›</button></div>
+        <p class="note">Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung. Die ersten 12 Accounts (▸) lassen sich aufklappen: Tage je Phase und Tages-P&amp;L. Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
       </div>
 
       <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft, Consistency-Regeln, die 15 %-Best-Day-Regel von Alpha Direct und Slippage sind nicht abgebildet. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>

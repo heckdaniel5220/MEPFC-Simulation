@@ -85,13 +85,40 @@ th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mute
 td{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 td.txt{font-family:var(--f-body)}
 .tbl{overflow-x:auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* Wo das Geld hingeht: Beschriftung bricht um, Beträge bleiben vollständig */
+#flow td.txt,#flow th{white-space:normal}
+#flow td.txt{min-width:9em}
+@media (max-width:420px){#flow{font-size:13px} #flow th,#flow td{padding:6px 4px}}
+/* Account-Tabelle */
+.lfilter{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.lfilter button{font:inherit;font-size:13px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:5px 10px;border-radius:999px;cursor:pointer}
+.lfilter button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.lfilter .num{font-weight:500;opacity:.75}
+.list th{padding:0}
+.list .sort{font:inherit;text-transform:inherit;letter-spacing:inherit;color:inherit;font-weight:inherit;background:none;border:0;padding:7px 8px;cursor:pointer;width:100%;text-align:inherit;white-space:nowrap}
+.list tr.clk{cursor:pointer}
+.list tr.clk:hover td,.list tr.open td{background:var(--sunk)}
+.chev::before{content:"▸";margin-left:4px;color:var(--muted)}
+.list tr.open .chev::before{content:"▾"}
+.detrow>td{background:var(--sunk);text-align:left;white-space:normal;font-family:var(--f-body);padding:10px 12px}
+.det table{font-size:13px;width:auto;margin-bottom:6px}
+.list .det th{padding:4px 10px;white-space:nowrap}
+.list .det td{padding:4px 10px}
+.det p{margin:6px 0 0;font-size:13px;line-height:1.6}
+.det p span{font-family:var(--f-num);white-space:nowrap}
+.pager{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:8px;margin-top:10px}
+.pager #lpage{text-align:center}
+@media (max-width:420px){.list{font-size:13px} .list td{padding:6px 5px} .list .sort{padding:6px 5px} .pill{font-size:11px;padding:2px 6px}}
+.pager .btn:disabled{opacity:.4;cursor:default}
+input:disabled,input[type=number]:disabled{cursor:not-allowed}
 .pill{font-family:var(--f-body);font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;display:inline-block}
 .pill.fail{background:color-mix(in srgb,var(--neg) 15%,transparent);color:var(--neg)}
 .pill.pass{background:color-mix(in srgb,var(--nohedge) 15%,transparent);color:var(--nohedge)}
 .pill.paid{background:color-mix(in srgb,var(--pos) 15%,transparent);color:var(--pos)}
 .calc{display:flex;flex-direction:column;gap:10px}
 .calc .line{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding-bottom:6px}
-.calc .line span:last-child{font-family:var(--f-num);font-variant-numeric:tabular-nums;font-weight:600}
+.calc .line>span:last-child{font-family:var(--f-num);font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap;flex:none;text-align:right}
 .note{font-size:13px;color:var(--muted)}
 .warn{background:var(--warnbg);color:var(--warnink);border-radius:var(--r);padding:12px 14px;font-size:14px}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap}

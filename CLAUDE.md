@@ -15,7 +15,7 @@ index.html        Markup (Deutsch), lädt die drei Skripte als klassische <scrip
 css/style.css     Design-Tokens (hell/dunkel) + Layout
 js/sim.js         Simulationskern, DOM-frei. Browser: window.GlitchSim, Node: module.exports
 js/offers.js      Daten: PRESETS (Szenario-Buttons) und OFFERS (alle Challenge-Angebote)
-js/app.js         Oberfläche: Regler + Zahlenfelder, Angebotsauswahl, Kennzahlen, SVG-Chart, Tabellen
+js/app.js         Oberfläche: Regler + Zahlenfelder (Zahlenfeld ist maßgeblich), Angebotsauswahl, Kennzahlen, SVG-Chart, Tabellen, Account-Tabelle (50 pro Seite, Filter, Sortierung)
 test/sim.test.js  Tests für den Kern (node, ohne Abhängigkeiten)
 ```
 
@@ -47,6 +47,7 @@ test/sim.test.js  Tests für den Kern (node, ohne Abhängigkeiten)
   - Blockiert die Regel: `consCompliant = true` beendet den Tag (Rest-Trades verfallen wie bei M-001, Drawdown und DLL des Trades werden vorher geprüft); `false` tradet am selben Tag weiter. Drawdown, DLL und MAXT gelten unverändert. Ohne Regel wirkt der Schalter nicht, alle Ergebnisse sind bit-identisch.
   - Ausgaben: `consBlocks` je Phase (Tage mit erreichtem Ziel bzw. erreichter Schwelle, an denen die Regel blockierte, höchstens 1 pro Tag) als Mittelwert in `days.<phase>` und als Anzahl in `phases.<phase>`, dazu `bestDay[]` (bester Tag am Tagesende, nach einem eventuellen Reset, nur Detail-Accounts). `consPassDelay` = Tage vom ersten Blockade-Tag bis zum Bestehen (Step 1 + Step 2, 0 ohne Blockade), Mittel über bestandene Accounts (Instant `null`). `consTargetFails` = `{n, hit, share}`: Phasen mit erreichtem Ziel, die danach gescheitert sind, von allen Phasen mit erreichtem Ziel.
   - Gemeinsamer Zufallsstrom: alle Accounts ziehen nacheinander aus einem Strom. Blockiert eine Funded-Regel, zieht der Account mehr Zahlen und alle folgenden Accounts bekommen andere Kurse. Abweichungen der Pass-Quote bei reiner Funded-Regel sind deshalb Rauschen; kein eigener Strom je Account, damit die Baseline bleibt.
+- **Account-Liste (M-014)**: `R.list` hat für alle `n` Accounts eine kompakte Zeile `{i, res, trades, days, nPay, pay, hedge, netNo, netHe}`, `res` = `'fail'` (Challenge verloren), `'pass'` (ohne Auszahlung; bei Instant: vor der 1. Auszahlung verloren), `'paid'` (≥ 1 Auszahlung). Zählung passt zu `fail`, `passNo`, `paid`. `accts` (12 Detail-Accounts) bleibt unverändert.
 - `MAXT = 500` ausgeführte Trades pro Phase als Notbremse.
 - Seed: `mulberry32`, Standard 20261015, „Neu würfeln“ ändert ihn.
 

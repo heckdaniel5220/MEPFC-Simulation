@@ -63,7 +63,7 @@
      'cycle' setzt den besten Tag nach dem Auszahlungstag auf 0, 'perpetual' nie. */
   function simulate(P, seed){
     const r=mulberry32(seed>>>0), MAXT=500, TPD=P.tradesPerDay||1;
-    const res={accts:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
+    const res={accts:[],list:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
       hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0};
     const PH=['step1','step2','funded'], sum={}, toPass=[];
     for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,consBlocks:0};
@@ -175,6 +175,8 @@
       cNo+=a.netNo; cHe+=a.netHe;
       res.cumNo.push(cNo); res.cumHe.push(cHe); res.cumReal.push(real);
       if(detail) res.accts.push(a);
+      // Kompakte Zeile je Account (alle n): Ergebnis 'fail' (Challenge verloren), 'pass' (ohne Auszahlung), 'paid' (≥ 1 Auszahlung)
+      res.list.push({i,res:!a.passed?'fail':a.nPay>0?'paid':'pass',trades:a.trades,days:day,nPay:a.nPay,pay:a.pay,hedge:a.hedge,netNo:a.netNo,netHe:a.netHe});
     }
     res.real=real; res.netNo=cNo; res.netHe=cHe;
     // Mittelwerte je Phase nur über Accounts, die die Phase erreicht haben (sonst null)
