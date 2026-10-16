@@ -253,4 +253,117 @@ test('alle ids eindeutig, keine Pro-10-%-ids mehr', () => {
   assert.ok(!ids.some(id => id.startsWith('ac-pro10')), 'Pro 10 % vorhanden');
 });
 
+// ---- Handelstage (M-001) ----
+const GOLD = { // Seed 20261015, n = 2000, Stand main 2219cb7
+  futures: [91.790984, 79.688959, 0.2650, 0.1050],
+  edge:    [497.459797, 420.200472, 0.4680, 0.2780],
+  instant: [151.728500, 92.433500, 1.0000, 0.2035],
+};
+const kpi = (R, n) => [(R.netNo / n).toFixed(6), (R.netHe / n).toFixed(6), (R.passed / n).toFixed(4), (R.paid / n).toFixed(4)].map(Number);
+// Ergebnis ohne die neuen Tagesfelder, für den Vergleich verschiedener tradesPerDay
+const core = R => JSON.stringify({ ...R, days: 0, medianDaysToPass: 0,
+  accts: R.accts.map(a => ({ ...a, phases: 0 })) });
+// Deterministischer Trade: p = 1 (immer Gewinn) bzw. p = 0 (immer Verlust)
+const det = (over) => prepare({ mode: 'challenge', fee: 100, target: 1000, target2: 0, dd: 2000, risk: 100, rr: 2, wr: 100,
+  cost: 10, hp: 5, hfund: false, buf: 0, minp: 300, wfrac: 100, cap: 100000, split: 90, maxp: 3, n: 20, ...over });
+
+test('M-001 Golden: tradesPerDay 1 und 3 ergeben exakt die Baseline', () => {
+  for (const k of Object.keys(GOLD)) {
+    const R1 = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: 1 }), SEED);
+    const R3 = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: 3 }), SEED);
+    assert.deepStrictEqual(kpi(R1, 2000), GOLD[k], k + ' tpd 1');
+    assert.deepStrictEqual(kpi(R3, 2000), GOLD[k], k + ' tpd 3');
+    assert.strictEqual(core(R3), core(R1), k + ' Gesamtergebnis bit-identisch');
+    const R0 = simulate(prepare({ ...PRESETS[k], n: 2000 }), SEED);
+    assert.strictEqual(core(R0), core(R1), k + ' Default = 1');
+  }
+});
+
+test('M-001 Determinismus: gleicher Seed und gleiche P bei tradesPerDay 3', () => {
+  const P = prepare({ ...PRESETS.edge, n: 500, tradesPerDay: 3 });
+  assert.strictEqual(JSON.stringify(simulate(P, SEED)), JSON.stringify(simulate(P, SEED)));
+});
+
+test('M-001 Zähler: p = 1 → winDays = tradingDays, p = 0 → winDays = 0', () => {
+  const W = simulate(det({ tradesPerDay: 2 }), SEED);
+  for (const k of ['step1', 'funded']) {
+    assert.ok(W.days[k].tradingDays > 0, k);
+    assert.strictEqual(W.days[k].winDays, W.days[k].tradingDays, k);
+  }
+  const L = simulate(det({ wr: 0, tradesPerDay: 2 }), SEED);
+  assert.ok(L.days.step1.tradingDays > 0);
+  assert.strictEqual(L.days.step1.winDays, 0);
+  assert.strictEqual(L.days.funded.n, 0);
+  assert.strictEqual(L.days.funded.tradingDays, null);
+});
+
+test('M-001 Tages-P&L: dayPnl = Summe der Trades inkl. cost', () => {
+  // Ziel unerreichbar: nur Step 1, Tage voll bis auf den letzten. Trades aus derselben Zufallsfolge nachrechnen.
+  const { mulberry32 } = require('../js/sim.js');
+  const tpd = 3, P = prepare({ ...PRESETS.futures, target: 1e9, n: 1, tradesPerDay: tpd });
+  const a = simulate(P, SEED).accts[0], ph = a.phases.step1, r = mulberry32(SEED);
+  const pnl = [];
+  for (let t = 0; t < a.trades; t++) {
+    if (t % tpd === 0) pnl.push(0);
+    pnl[pnl.length - 1] += (r() < P.p ? P.risk * P.rr : -P.risk) - P.cost;
+  }
+  assert.deepStrictEqual(ph.dayPnl, pnl);
+  assert.strictEqual(ph.days, Math.ceil(a.trades / tpd));
+  // Deterministisch: p = 1, 2 Trades pro Tag, jeder Trade 190 $
+  const b = simulate(det({ tradesPerDay: 2, target: 1e9, n: 1 }), SEED).accts[0];
+  assert.ok(b.phases.step1.dayPnl.every(x => x === 380));
+});
+
+test('M-001 Phasenwechsel: Bestehen mitten am Tag, Rest-Trades verfallen', () => {
+  // 190 $ je Trade, Ziel 950 $ → bestanden mit dem 5. Trade = Tag 2, Trade 2 von 3
+  const P = det({ target: 950, tradesPerDay: 3, n: 1 });
+  const a = simulate(P, SEED).accts[0], s1 = a.phases.step1, f = a.phases.funded;
+  assert.deepStrictEqual([s1.days, s1.firstDay, s1.lastDay], [2, 1, 2]);
+  assert.deepStrictEqual(s1.dayPnl, [570, 380]);
+  assert.strictEqual(f.firstDay, s1.lastDay + 1);
+  // Verfallene Trades ziehen keine Zahl und zählen nicht: gleiches Ergebnis wie tradesPerDay 1
+  const a1 = simulate(det({ target: 950, tradesPerDay: 1, n: 1 }), SEED).accts[0];
+  assert.strictEqual(a.trades, a1.trades);
+  assert.strictEqual(a.pay, a1.pay);
+  // Mit Zufall: ganze Folge bleibt identisch
+  const Rn = simulate(prepare({ ...PRESETS.futures, n: 300, tradesPerDay: 4 }), SEED);
+  const R1 = simulate(prepare({ ...PRESETS.futures, n: 300 }), SEED);
+  assert.strictEqual(core(Rn), core(R1));
+  for (const x of Rn.accts) if (x.phases.funded) assert.strictEqual(x.phases.funded.firstDay, x.phases.step1.lastDay + 1);
+});
+
+test('M-001 Auszahlung: neuer Tag danach, Funded-Zähler laufen weiter', () => {
+  // 190 $ je Trade, minp 300 → Auszahlung nach 2 Trades, eq danach 0; maxp 3
+  const a = simulate(det({ target: 190, tradesPerDay: 3, n: 1 }), SEED).accts[0], f = a.phases.funded;
+  assert.strictEqual(a.nPay, 3);
+  assert.deepStrictEqual([f.days, f.winDays, f.firstDay, f.lastDay], [3, 3, 2, 4]);
+  assert.deepStrictEqual(f.dayPnl, [380, 380, 380]);
+  // Instant: Funded zählt über alle Zyklen, step1/step2 gibt es nicht
+  const R = simulate(prepare({ ...PRESETS.instant, n: 200, tradesPerDay: 3 }), SEED);
+  for (const x of R.accts) {
+    assert.strictEqual(x.phases.step1, null); assert.strictEqual(x.phases.step2, null);
+    assert.strictEqual(x.phases.funded.firstDay, 1);
+    assert.strictEqual(x.phases.funded.lastDay, x.phases.funded.days);
+    assert.ok(x.phases.funded.days >= x.nPay);
+  }
+});
+
+test('M-001 medianDaysToPass: 2-Step summiert, ohne Bestehen null', () => {
+  // Step 1: 2 Trades (1 Tag), Step 2: 4 Trades (2 Tage) → 3 Tage
+  const R = simulate(det({ target: 380, target2: 760, tradesPerDay: 3 }), SEED);
+  assert.strictEqual(R.passed, 20);
+  assert.strictEqual(R.days.step2.n, 20);
+  assert.strictEqual(R.medianDaysToPass, 3);
+  const a = R.accts[0];
+  assert.deepStrictEqual([a.phases.step2.firstDay, a.phases.step2.lastDay, a.phases.funded.firstDay], [2, 3, 4]);
+  assert.strictEqual(simulate(det({ wr: 0, tradesPerDay: 3 }), SEED).medianDaysToPass, null);
+  assert.strictEqual(simulate(prepare({ ...PRESETS.instant, n: 50 }), SEED).medianDaysToPass, null);
+});
+
+test('M-001 Validierung: tradesPerDay 0, 1.5 und "2" werfen', () => {
+  for (const v of [0, 1.5, '2', -1, NaN, null]) assert.throws(() => prepare({ ...PRESETS.futures, tradesPerDay: v }), String(v));
+  assert.strictEqual(prepare({ ...PRESETS.futures }).tradesPerDay, 1);
+  assert.strictEqual(prepare({ ...PRESETS.futures, tradesPerDay: 5 }).tradesPerDay, 5);
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

@@ -31,12 +31,16 @@ test/sim.test.js  Tests für den Kern (node, ohne Abhängigkeiten)
 - **Funded**: Auszahlung, sobald Gewinn ≥ `buf + minp`. Betrag = `min(cap, (Gewinn - buf) * wf)`, ausgezahlt wird `Betrag * sp` (Split). Max. `maxp` Auszahlungen, danach endet der Account (Review/Live).
 - **Gegentrade**: pro Trade `-h * Brutto - h * cost` aufs Echtgeld-Konto. Aktiv in der Absicherungsphase (Challenge, bei Instant bis 1. Auszahlung) oder immer, wenn `hfund = true`.
 - **Ausgaben**: netNo, netHe, real (Echtgeld-Saldo), realMin (größter Rückgang = benötigtes Echtgeld), hFail/nFail und hSucc/nSucc (Refinanzierung vs. Kosten), cum*-Reihen für den Chart, die ersten 12 Accounts für die Detailtabelle.
-- `MAXT = 500` Trades pro Phase als Notbremse.
+- **Handelstage (M-001)**: `tradesPerDay` (Ganzzahl ≥ 1, Default 1, `prepare()` prüft und wirft sonst) Trades pro Tag. Tages-P&L = Summe der Trade-Ergebnisse inkl. `cost` (ohne Auszahlung und Gegentrade). Drawdown weiter pro Trade. Phasenwechsel (Step 1 → Step 2, Bestehen, Scheitern, Account-Verlust, MAXT) beendet den Tag; die Rest-Trades verfallen: keine Zufallszahl, zählen nicht auf MAXT, die neue Phase beginnt am Folgetag. Eine Auszahlung beendet ebenfalls den Tag, ist aber kein Phasenwechsel (Funded-Zähler laufen über alle Zyklen). Da verfallene Trades nichts ziehen, sind alle bisherigen Kennzahlen für jedes `tradesPerDay` bit-identisch.
+  - Zähler je Phase (`step1`, `step2`, `funded`): `tradingDays` (Tag mit ≥ 1 Trade), `winDays` (Tages-P&L > 0). Tagesnummer läuft je Account fortlaufend über alle Phasen.
+  - Ausgaben: `days.<phase>` = `{n, tradingDays, winDays}`, Mittelwerte nur über die `n` Accounts, die die Phase erreicht haben (sonst `null`; bei Instant nur `funded`). `medianDaysToPass` = Median der Tage Step 1 + Step 2 inkl. Tag des Bestehens über bestandene Accounts (gerade Anzahl: Mittel der beiden mittleren), ohne bestandene Accounts oder bei Instant `null`. Detail-Accounts: `phases.<phase>` = `{days, winDays, firstDay, lastDay, dayPnl[]}` bzw. `null`, wenn nicht erreicht.
+- `MAXT = 500` ausgeführte Trades pro Phase als Notbremse.
 - Seed: `mulberry32`, Standard 20261015, „Neu würfeln“ ändert ihn.
 
 ## Bekannte Lücken (TODO, nach Priorität)
-1. **Consistency-Regeln** (Best Day ≤ 40/50 % in Eval oder Funded, Alpha Capital Direct 15 %) fehlen. Braucht Tages-Struktur: mehrere Trades pro Tag, Tages-P&L.
-2. **Daily Loss Limit** (soft/hard) fehlt. Braucht ebenfalls Tages-Struktur.
+- **M-001 Handelstage erledigt** (Tagesstruktur, Tages-P&L, Handels- und Gewinntage je Phase).
+1. **M-002 Daily Loss Limit pro Angebot**: soft (Tag endet) oder hard (Account weg), Eval und Funded getrennt; Daten aus `rules.dlg*`/`dailyDd`.
+2. **Consistency-Regeln** (Best Day ≤ 40/50 % in Eval oder Funded, Alpha Capital Direct 15 %) fehlen. Tagesstruktur ist seit M-001 vorhanden.
 3. **Gewinntage-Pflicht** (z. B. 5 Tage ≥ 200 $) ist nur über `minp` angenähert.
 4. **Monatsgebühren** (Alpha Futures rechnet monatlich ab; MFFU seit M-010c einmalig): Fee ist pauschal pro Account, Re-Billing bei langen Challenges fehlt.
 5. **Max. offenes Risiko pro Asset** (Alpha Capital Direct 1 %) wird nur über die Risikovorgabe der Angebotsauswahl eingehalten, nicht im Kern geprüft.
