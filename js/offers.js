@@ -185,6 +185,7 @@
   const FN_SRC={
     flex:'https://helpfutures.fundednext.com/en/articles/17229829-fundednext-futures-flex-challenge-all-rules',
     rp:'https://helpfutures.fundednext.com/en/articles/17229677-fundednext-futures-rapid-pro-challenge-all-rules',
+    rd:'https://helpfutures.fundednext.com/en/articles/17229779-fundednext-futures-rapid-daily-fundednext-account-all-rules',
     direct:'https://helpfutures.fundednext.com/en/articles/17430065-fundednext-futures-direct-account-all-rules'};
   // Plan, Größe, Liste, Codepreis (1. Account), Codepreis Folge-Accounts, Reset, Ziel, MLL, Lock, Mini, Micro, plus planeigene Werte
   const FN_ROWS=[
@@ -194,13 +195,17 @@
     ['flex',150,490.99,259.99,289.99,284.99,8000,4000,150100,8,80,{bench:250,cap:4000}],
     // Rapid Pro: … Cap
     ['rp',25,159.98,79.99,84.99,84.99,1500,1000,25100,2,20,{cap:800}],
-    ['rp',50,299.98,159.99,174.99,174.99,3000,2000,50100,4,40,{cap:1200}],
+    ['rp',50,299.98,169.99,174.99,174.99,3000,2000,50100,4,40,{cap:1200,asof:'2026-10-16',kachel:true}],
     ['rp',100,499.98,279.99,299.99,299.99,5000,2500,100100,6,60,{cap:2500}],
+    // Rapid Daily (Preise 16.10.2026): … DLL, Puffer, Cap
+    ['rd',25,159.98,79.99,89.99,89.99,1500,1000,25100,2,20,{dll:500,buffer:1100,cap:800,asof:'2026-10-16'}],
+    ['rd',50,299.98,169.99,189.99,189.99,3000,2000,50100,4,40,{dll:1000,buffer:2100,cap:1200,asof:'2026-10-16'}],
+    ['rd',100,499.98,279.99,299.99,299.99,5000,2500,100100,6,60,{dll:1250,buffer:2600,cap:2500,asof:'2026-10-16'}],
     // Direct: kein Reset, kein Ziel
     ['direct',50,283.99,169.99,null,null,null,2000,50100,3,30,{cap:1200}]
   ];
   const FN = ([plan,size,price,codePrice,codeNext,reset,goal,mll,mllLock,maxMini,maxMicro,x])=>{
-    const NAME={flex:'Flex',rp:'Rapid Pro',direct:'Direct'}, CODE={flex:'FNFLEX',rp:'RAPID',direct:'FNDIRECT'}, direct=plan==='direct';
+    const NAME={flex:'Flex',rp:'Rapid Pro',rd:'Rapid Daily',direct:'Direct'}, CODE={flex:'FNFLEX',rp:'RAPID',rd:'RAPID',direct:'FNDIRECT'}, direct=plan==='direct';
     const fmt=v=>v.toLocaleString('de-DE'), eur=v=>v.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2});
     const r={price,codePrice,codePriceFrom3rd:codeNext,reset,target:goal,mll,mllLock,mllFixedAfterFirstPayout:null,dlgEval:null,dlgFunded:null,dlgType:null,
       consEval:null,consEvalMode:null,consFunded:null,consFundedMode:null,benchmarkDays:null,benchmarkMin:null,cycleProfitMin:null,payoutMin:null,
@@ -213,7 +218,11 @@
     } else if(plan==='rp'){
       Object.assign(r,{consFunded:40,consFundedMode:'cycle',cycleProfitMin:500,payoutMin:250,payoutEveryDays:3});
       k={buf:100,wfrac:100,minp:500,split:90};
-      regeln=`Eval ohne Consistency. Funded-Consistency 40 % (bester Tag ÷ Zyklusgewinn). Kein DLL; DLL-Add-On laut Help-Center (günstiger) ist auf der Website nicht sichtbar, nicht verwendet. Auszahlung alle 3 Tage, Zyklusgewinn ≥ 500 $, min. 250 $, max. ${fmt(x.cap)} $, kein Puffer. Nach 5 Auszahlungen beendet. Codepreis ab dem 2. Account ${eur(codeNext)} $ (in rules.codePriceFrom3rd).`;
+      regeln=`Eval ohne Consistency. Funded-Consistency 40 % (bester Tag ÷ Zyklusgewinn). Kein DLL; DLL-Add-On laut Help-Center (günstiger) ist auf der Website nicht sichtbar, nicht verwendet. Auszahlung alle 3 Tage, Zyklusgewinn ≥ 500 $, min. 250 $, max. ${fmt(x.cap)} $, kein Puffer. Nach 5 Auszahlungen beendet. Codepreis ab dem 2. Account ${eur(codeNext)} $ (in rules.codePriceFrom3rd).${x.kachel?' Preis laut Kachel 16.10.2026 (Kachel „Rapid 50k“ gilt für Pro und Daily; 15.10.: 159,99 $).':''}`;
+    } else if(plan==='rd'){
+      Object.assign(r,{dlgEval:x.dll,dlgFunded:x.dll,dlgType:'soft',cycleProfitMin:500,payoutMin:250,payoutEveryDays:1,buffer:x.buffer});
+      k={buf:x.buffer,wfrac:100,minp:500,split:90};
+      regeln=`Keine Consistency in Eval und Funded. DLL ${fmt(x.dll)} $ (soft) in Eval und Funded. Auszahlung täglich möglich, keine Mindest-Handelstage; EOD-Balance ≥ Puffer ${fmt(x.buffer)} $ und Zyklusgewinn ≥ 500 $, min. 250 $, max. ${fmt(x.cap)} $ je Auszahlung. Nach 5 Auszahlungen beendet. Codepreis ab dem 2. Account ${eur(codeNext)} $ (in rules.codePriceFrom3rd).`;
     } else {
       Object.assign(r,{mllFixedAfterFirstPayout:true,dlgFunded:1000,dlgType:'soft',consFunded:20,consFundedMode:'perpetual-best-day',payoutMin:800,buffer:2100,inactivityDays:7});
       k={buf:2100,wfrac:100,minp:800,split:90};
@@ -222,11 +231,12 @@
     const allg=`MLL EOD-trailing, Bruch intraday auf Equity. Max. ${maxMini} Mini/${maxMicro} Micro (1:10). Einmalgebühr, keine Aktivierungsgebühr. ${CODE[plan]}-Preis ${eur(codePrice)} $${reset!=null?`, Reset ${eur(reset)} $`:''}.`;
     const annahmen=['Annahmen: EOD-trailing, Kern pro Trade (strenger); Lock bei Start + 100, Kern bei Start (100 $ milder).'];
     if(plan==='flex') annahmen.push(`Eval-Consistency gegen Profit-Ziel, Kern ignoriert (bis M-003). buf 100 = MLL fest bei Start + 100 nach der 1. Auszahlung. minp ${fmt(k.minp)} $ = max(500 $; 5 × ${fmt(x.bench)} $; 2 × 250 $).`);
+    if(plan==='rd') annahmen.push('DLL noch nicht im Kern (M-002).');
     if(plan==='rp') annahmen.push('buf 100 (konservativ: nach dem Lock muss das Konto über Start + 100 bleiben). Funded-Consistency nicht im Kern.');
     if(direct) annahmen.push('DLL, Consistency und Wochen-Trade nicht im Kern.');
     return {id:`fn-${plan}-${size}`,n:`${NAME[plan]} ${size}k`,mode:direct?'instant':'challenge',fee:codePrice,list:`${price} $ einmalig`,code:CODE[plan],
       target:direct?0:goal,target2:0,dd:mll,buf:k.buf,minp:k.minp,wfrac:k.wfrac,cap:x.cap,split:k.split,maxp:5,
-      src:FN_SRC[plan],asof:'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
+      src:FN_SRC[plan],asof:x.asof||'2026-10-15',rules:r,note:`${regeln} ${allg} ${annahmen.join(' ')}`};
   };
   // ---- Alpha Capital (CFD): Regeln aus help.alphacapitalgroup.uk (Artikel Juli/Aug. 2026), Preise Checkout-Datensatz /api/v3/challenges/ (Mitschnitt 16.10.2026) ----
   // fee = Codepreis (rules.codePrice), rules.price = Listenpreis. Codes laut alphacapitalgroup.uk/alpha-capital-discount-codes (Stand 14.10.2026). Abbildung: siehe CLAUDE.md.

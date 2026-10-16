@@ -172,15 +172,16 @@ test('MFFU-ids sind eindeutig', () => {
 // ---- FundedNext-Futures-Katalog (M-010d) ----
 const FN = OFFERS.find(gr => gr.g.startsWith('FundedNext')).items;
 
-test('FundedNext hat 7 Einträge', () => {
-  assert.strictEqual(FN.length, 7);
-  assert.deepStrictEqual(FN.map(o => o.id), ['fn-flex-50', 'fn-flex-100', 'fn-flex-150', 'fn-rp-25', 'fn-rp-50', 'fn-rp-100', 'fn-direct-50']);
+test('FundedNext hat 10 Einträge', () => {
+  assert.strictEqual(FN.length, 10);
+  assert.deepStrictEqual(FN.map(o => o.id), ['fn-flex-50', 'fn-flex-100', 'fn-flex-150', 'fn-rp-25', 'fn-rp-50', 'fn-rp-100',
+    'fn-rd-25', 'fn-rd-50', 'fn-rd-100', 'fn-direct-50']);
 });
 
 test('FundedNext-Einträge haben Quelle, Stand, Rohregeln und Code', () => {
   for (const o of FN) {
     assert.ok(typeof o.src === 'string' && o.src.startsWith('https://helpfutures.fundednext.com/'), o.id);
-    assert.strictEqual(o.asof, '2026-10-15', o.id);
+    assert.strictEqual(o.asof, o.id.startsWith('fn-rd-') || o.id === 'fn-rp-50' ? '2026-10-16' : '2026-10-15', o.id);
     assert.ok(o.rules && typeof o.rules === 'object', o.id);
     assert.ok(['FNFLEX', 'RAPID', 'FNDIRECT'].includes(o.code), o.id);
   }
@@ -205,6 +206,22 @@ test('FundedNext: Direct instant mit Ziel 0, sonst 1-Step-Challenge', () => {
   }
 });
 
+test('FundedNext Rapid Daily: buf = MLL + 100, fee = Codepreis, split 90, DLL soft, keine Consistency', () => {
+  const RD = FN.filter(o => o.id.startsWith('fn-rd-'));
+  assert.strictEqual(RD.length, 3);
+  for (const o of RD) {
+    assert.strictEqual(o.buf, o.rules.mll + 100, o.id + ' buf');
+    assert.strictEqual(o.buf, o.rules.buffer, o.id + ' buffer');
+    assert.strictEqual(o.fee, o.rules.codePrice, o.id + ' fee');
+    assert.strictEqual(o.split, 90, o.id + ' split');
+    assert.strictEqual(o.code, 'RAPID', o.id + ' code');
+    assert.strictEqual(o.rules.dlgType, 'soft', o.id + ' dlgType');
+    assert.strictEqual(o.rules.consEval, null, o.id + ' consEval');
+    assert.strictEqual(o.rules.consFunded, null, o.id + ' consFunded');
+  }
+  assert.strictEqual(FN.find(o => o.id === 'fn-rp-50').fee, 169.99, 'fn-rp-50 Preis 16.10.');
+});
+
 test('alle ids eindeutig, keine FundedNext-Legacy-ids mehr', () => {
   const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
   assert.strictEqual(new Set(ids).size, ids.length);
@@ -214,9 +231,9 @@ test('alle ids eindeutig, keine FundedNext-Legacy-ids mehr', () => {
 // ---- Alpha-Capital-Katalog (M-010e) ----
 const AC = OFFERS.find(gr => gr.g.startsWith('Alpha Capital')).items;
 
-test('Alpha Capital hat 19 Einträge, insgesamt 66 Angebote (57 − 10 + 19)', () => {
+test('Alpha Capital hat 19 Einträge, insgesamt 69 Angebote (66 + 3 Rapid Daily)', () => {
   assert.strictEqual(AC.length, 19);
-  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 66);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 69);
 });
 
 test('Alpha Capital: src, asof, rules, code und codeValidUntil je Eintrag', () => {
