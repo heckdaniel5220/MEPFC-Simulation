@@ -366,7 +366,7 @@
       `Guardian Shield (nur Funded): ${shield} % offener Verlust schließt alle Trades, 1. Mal Split 50 %, 2. Mal Account weg${plan.endsWith('nano')?' (bei Nano nicht genannt, konservativ 2 %)':''}`,
       `Einmalgebühr, Liste ${bgFmt(price)} $, Website-Preis ${bgFmt(codePrice)} $ (HALLOWEEN −35 %). Saisoncode ohne Ablaufdatum, Abgleich. Gegentrades verboten`
     ].filter(Boolean).join('. ')+'.';
-    const annahmen=`Annahmen: split ${bgFmt(split)} = ${p.split} % × 0,97 inkl. 3 % Auszahlungsgebühr. Guardian Shield als maxRisk ${shield} % (${bgFmt(size*shield/100)} $; die App deckelt das Risiko auch in der Challenge). Tages-DD im Kern als hartes DLL (M-002)${consFunded||p.consEval?', Consistency je Zyklus (M-003, strikt <)':''}. ${p.stat?'buf 0 (statisch).':'buf 1 % der Größe (Puffer nach Lock).'} minp ${bgFmt(minp)} $ = Mindestauszahlung. ${cap===100000?'cap 100.000 $ = kein Cap':`cap ${bgFmt(cap)} $${firstCap?' für alle Auszahlungen (konservativ)':''}`}. maxp 5 Konvention. Gewinntage ≥ 0,5 % (${bgFmt(size*0.005)} $) im Kern seit M-004${p.minProfitDays?' (Funded je Zyklus, konservativ)':''}${p.minDaysEval?' (Eval je Phase)':''}, Auszahlungsrhythmus nicht.`;
+    const annahmen=`Annahmen: split ${bgFmt(split)} = ${p.split} % × 0,97 inkl. 3 % Auszahlungsgebühr. Guardian Shield als maxRisk ${shield} % (${bgFmt(size*shield/100)} $; die App deckelt das Risiko auch in der Challenge). Tages-DD im Kern als hartes DLL (M-002)${consFunded||p.consEval?', Consistency je Zyklus (M-003, strikt <)':''}. ${p.stat?'buf 0 (statisch).':'buf 1 % der Größe (Puffer nach Lock).'} minp ${bgFmt(minp)} $ = Mindestauszahlung. ${cap===100000?'cap 100.000 $ = kein Cap':`cap ${bgFmt(cap)} $${firstCap?' für alle Auszahlungen (konservativ)':''}`}. maxp 5 Konvention. Gewinntage ≥ 0,5 % (${bgFmt(size*0.005)} $) im Kern seit M-004${p.minProfitDays?' (Funded je Zyklus, konservativ)':''}${p.minDaysEval?' (Eval je Phase)':''}, ${p.every>1?`Auszahlungsrhythmus ${p.every} Kalendertage im Kern seit M-005 (auch für die 1. Auszahlung)`:'Auszahlung on demand'}.`;
     return {id:`bg-cfd-${plan}-${k}`,n:`${p.n} ${bgFmt(k)}k`,mode:instant?'instant':'challenge',fee:codePrice,list:`${bgFmt(price)} $ einmalig`,code:'HALLOWEEN',
       maxRisk:size*shield/100,target:instant?0:goal1,target2:goal2||0,dd:mll,...(p.stat?{ddStatic:true}:{}),
       buf:p.stat?0:size*0.01,minp,wfrac:100,cap,split,maxp:5,
@@ -483,6 +483,26 @@
       payMinDays:r.minDaysCycle??r.minDaysPayout??0,
       payWinDays:r.winDays??r.benchmarkDays??r.minProfitDays??0,
       payWinDayMin:r.winDayMin??r.benchmarkMin??(r.minProfitDays?pct(r.minProfitDayPct):0)});
+  }
+
+  // ---- Kalender und Gebühren (M-005): Kernfelder aus rules ableiten ----
+  // Wartezeit bis zur 1. Auszahlung ab dem 1. Funded-Trade: firstPayoutAfterHours (MFFU, auf ganze Tage aufgerundet),
+  // firstPayoutAfterDays (BG Futures Std, als Kalendertage) bzw. der Rhythmus payoutEveryDays (BG CFD, FN Rapid Pro gelten auch für die 1. Auszahlung).
+  // payoutEveryDays 0 (on demand) und 1 (täglich) sind im Kern wirkungslos (höchstens 1 Auszahlung pro Tag) und bleiben 0.
+  // Monatsabo: billing 'monthly' (Alpha Futures Eval), Folgemonat = Listenpreis. Aktivierungsgebühr: keine Quelle mit Betrag, überall 0.
+  for(const gr of OFFERS) for(const o of gr.items){
+    const r=o.rules||{}, every=r.payoutEveryDays>1?r.payoutEveryDays:0;
+    Object.assign(o,{
+      payFirstAfterCal:r.firstPayoutAfterHours!=null?Math.ceil(r.firstPayoutAfterHours/24):(r.firstPayoutAfterDays??every),
+      payEveryCal:every,
+      feeMonthly:r.billing==='monthly'?r.price:0,
+      feeActivation:0});
+    const t=[];
+    if(o.payFirstAfterCal>0) t.push(`Kalender (M-005): 1. Auszahlung frühestens ${o.payFirstAfterCal} Kalendertag${o.payFirstAfterCal>1?'e':''} nach dem 1. Funded-Trade${r.firstPayoutAfterHours!=null?` (${r.firstPayoutAfterHours} h aufgerundet)`:''}${every?`, danach alle ${every} Kalendertage`:''}; regeltreu pausiert der Trader bis zum Termin.`);
+    if(r.firstPayoutAfterDays!=null) t.push('„3 Tage“: Art offen (Sekundärquelle), bei Start Do/Fr milder als Handelstage, gemessen ohne Wirkung.');
+    if(o.feeMonthly>0) t.push(`Monatsabo (M-005): je weitere angefangene 30 Kalendertage der Challenge ${o.feeMonthly} $ (Folgemonat = Listenpreis, Verlängerungspreis ohne Quelle), endet sofort bei Bestehen oder Scheitern, keine Funded-Monatsgebühr. Max. 4 Anträge/Monat nur Notiz (gemessen 0 Blockaden).`);
+    if(r.inactivityDays!=null) t.push(`Inaktivität ${r.inactivityDays} Tage nur Notiz: im Kern jeden Handelstag ≥ 1 Trade, größte Lücke Fr → Mo 3 Kalendertage.`);
+    if(t.length) o.note+=' '+t.join(' ');
   }
 
   const api={PRESETS,OFFERS};

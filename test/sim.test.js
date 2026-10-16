@@ -349,7 +349,7 @@ const GOLD = { // Seed 20261015, n = 2000, Stand main 2219cb7
 const kpi = (R, n) => [(R.netNo / n).toFixed(6), (R.netHe / n).toFixed(6), (R.passed / n).toFixed(4), (R.paid / n).toFixed(4)].map(Number);
 // Ergebnis ohne die neuen Tagesfelder, für den Vergleich verschiedener tradesPerDay
 const core = R => JSON.stringify({ ...R, days: 0, medianDaysToPass: 0,
-  accts: R.accts.map(a => ({ ...a, phases: 0 })), list: (R.list || []).map(x => ({ ...x, days: 0, daysToFirstPay: 0 })) });
+  accts: R.accts.map(a => ({ ...a, phases: 0, calDays: 0 })), list: (R.list || []).map(x => ({ ...x, days: 0, daysToFirstPay: 0, calDays: 0, calToFirstPay: 0 })) });
 // Deterministischer Trade: p = 1 (immer Gewinn) bzw. p = 0 (immer Verlust)
 const det = (over) => prepare({ mode: 'challenge', fee: 100, target: 1000, target2: 0, dd: 2000, risk: 100, rr: 2, wr: 100,
   cost: 10, hp: 5, hfund: false, buf: 0, minp: 300, wfrac: 100, cap: 100000, split: 90, maxp: 3, n: 20, ...over });
@@ -997,6 +997,190 @@ test('M-004 Daten je Anbieter: Tage-Felder und minp', () => {
     const o = byId(id);
     assert.deepStrictEqual([...DAYS_KEYS.slice(0, 6).map(k => o[k]), o.minp], e, id);
   }
+});
+
+// ---- Kalender und Gebühren (M-005) ----
+const { calDay } = require('../js/sim.js');
+const CAL_KEYS = ['payFirstAfterCal', 'payEveryCal', 'feeMonthly', 'feeActivation'];
+const CAL_ZERO = { payFirstAfterCal: 0, payEveryCal: 0, feeMonthly: 0, feeActivation: 0 };
+const withCal = o => Object.fromEntries(CAL_KEYS.map(k => [k, o[k]]));
+// Ergebnis ohne die Zeitfelder (Tage, Kalender, Detail-Phasen), für die Geld-Gleichheit bei Pause
+const moneyList = R => JSON.stringify(R.list.map(x => [x.res, x.trades, x.nPay, x.pay, x.hedge, x.netNo, x.netHe, x.feesPaid]));
+
+test('M-005 Golden: ohne Regel exakt die Baseline (Presets, alle Angebote, tradesPerDay 1 und 3)', () => {
+  for (const k of Object.keys(PRESETS)) for (const tpd of [1, 3]) {
+    const R = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd }), SEED);
+    const Z = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...CAL_ZERO }), SEED);
+    const F = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...CAL_ZERO, calCompliant: false }), SEED);
+    if (GOLD[k]) assert.deepStrictEqual(kpi(R, 2000), GOLD[k], k + ' tpd ' + tpd);
+    assert.strictEqual(JSON.stringify(Z), JSON.stringify(R), k + ' explizit 0 = Default');
+    assert.strictEqual(JSON.stringify(F), JSON.stringify(R), k + ' Schalter ohne Regel wirkungslos');
+    assert.strictEqual(R.fees, PRESETS[k].fee * 2000, k + ' Fees pauschal');
+    assert.ok(R.list.every(x => x.feesPaid === PRESETS[k].fee), k);
+    for (const ph of ['step1', 'step2', 'funded']) if (R.days[ph].n) assert.strictEqual(R.days[ph].calBlocks, 0, k + ' ' + ph);
+  }
+  for (const id of ['mf-pro-50', 'bg-cfd-1step-50', 'af-adv-50', 'fn-rp-50', 'bg-fut-std-50']) for (const tpd of [1, 3]) {
+    const o = byId(id);
+    const A = simulate(offerP(o, { tradesPerDay: tpd }), SEED), B = simulate(offerP(o, { tradesPerDay: tpd, ...CAL_ZERO }), SEED);
+    assert.strictEqual(JSON.stringify(B), JSON.stringify(A), id + ' tpd ' + tpd);
+  }
+});
+
+test('M-005 Validierung: Kalenderfelder, Gebühren und calCompliant', () => {
+  const ok = { ...PRESETS.futures };
+  for (const k of ['payFirstAfterCal', 'payEveryCal']) for (const v of [-1, 1.5, '3', NaN, null])
+    assert.throws(() => prepare({ ...ok, [k]: v }), new RegExp(k), k + ' ' + v);
+  for (const k of ['feeMonthly', 'feeActivation']) for (const v of [-1, Infinity, '50', NaN, null])
+    assert.throws(() => prepare({ ...ok, [k]: v }), new RegExp(k), k + ' ' + v);
+  for (const v of [1, 'true', null]) assert.throws(() => prepare({ ...ok, calCompliant: v }), /calCompliant/);
+  const P = prepare({ ...ok, payFirstAfterCal: 14, payEveryCal: 0, feeMonthly: 12.5, feeActivation: 0, calCompliant: false });
+  assert.deepStrictEqual([P.payFirstAfterCal, P.feeMonthly, P.calCompliant], [14, 12.5, false]);
+  assert.strictEqual(prepare(ok).calCompliant, true, 'Standard = Pause');
+});
+
+test('M-005 Kalender: Fünf-Tage-Woche ab Montag', () => {
+  assert.deepStrictEqual([1, 2, 5, 6, 10, 11, 22, 23].map(calDay), [1, 2, 5, 8, 12, 15, 30, 31]);
+  // jeder Kalendertag ist Mo–Fr (Rest 1–5 modulo 7), streng steigend
+  for (let d = 1; d < 400; d++) { const c = calDay(d), w = (c - 1) % 7; assert.ok(w < 5, d); assert.ok(calDay(d + 1) > c, d); }
+});
+
+test('M-005 Wartezeit: 24 h / 48 h / 14 Tage → Funded-Tag 2 / 3 / 11, Start Freitag mit 48 h → Tag 2', () => {
+  // Instant, je Trade +190, Schwelle 300 nach 2 Trades an Tag 1
+  assert.strictEqual(fundD({}).accts[0].phases.funded.firstPayDay, 1);
+  for (const [x, d] of [[1, 2], [2, 3], [14, 11]]) {
+    const R = fundD({ payFirstAfterCal: x }), f = R.accts[0].phases.funded;
+    assert.strictEqual(f.firstPayDay, d, x + ' Kalendertage');
+    assert.strictEqual(R.list[0].calToFirstPay, calDay(d));
+    assert.strictEqual(R.days.funded.calToFirstPay, calDay(d));
+    // Pause: an Tag 1 Schwelle erreicht, dann ohne Trade bis zur Auszahlung; Auszahlungstag ist kein Handelstag
+    assert.deepStrictEqual(f.dayPnl.slice(0, 1), [380]);
+    assert.strictEqual(f.calBlocks >= 1, true);
+  }
+  // Challenge besteht Donnerstag (Tag 4: 3 + 3 + 3 + 1 Trades à 190 = 1.900), Funded startet Freitag
+  const fr = over => simulate(det({ target: 1900, tradesPerDay: 3, maxp: 1, n: 1, ...over }), 1).accts[0].phases.funded;
+  assert.deepStrictEqual([fr({}).firstDay, fr({}).firstPayDay], [5, 5]);
+  assert.strictEqual(fr({ payFirstAfterCal: 2 }).firstPayDay, 6, 'Fr + 48 h = So → Montag = Funded-Tag 2');
+  assert.strictEqual(fr({ payFirstAfterCal: 1 }).firstPayDay, 6, 'Fr + 24 h = Sa → Montag');
+});
+
+test('M-005 Rhythmus: Abstand der Auszahlungen ≥ payEveryCal, 1. Auszahlung ≥ payFirstAfterCal', () => {
+  for (const cc of [true, false]) for (const tpd of [1, 3]) {
+    const R = simulate(prepare({ ...PRESETS.instant, wr: 55, n: 300, maxp: 5, tradesPerDay: tpd, payFirstAfterCal: 7, payEveryCal: 14, calCompliant: cc }), SEED);
+    let checked = 0;
+    for (const a of R.accts) { const f = a.phases.funded; if (!f.payDays.length) continue;
+      assert.ok(calDay(f.payDays[0]) >= calDay(f.firstDay) + 7, 'erste');
+      for (let j = 1; j < f.payDays.length; j++) { assert.ok(calDay(f.payDays[j]) >= calDay(f.payDays[j - 1]) + 14, 'Abstand'); checked++; }
+      assert.strictEqual(f.payDays.length, a.nPay); }
+    assert.ok(checked > 0, 'mindestens zwei Auszahlungen geprüft');
+    assert.ok(R.days.funded.calBlocks > 0);
+  }
+});
+
+test('M-005 Pause: Geld bit-identisch zu ohne Kalender, nur die Zeit verschiebt sich', () => {
+  for (const id of ['bg-cfd-1step-50', 'mf-pro-50', 'bg-cfd-2step-nano-50', 'fn-rp-50']) for (const tpd of [1, 3]) {
+    const o = byId(id), cal = withCal(o);
+    assert.ok(cal.payFirstAfterCal > 0, id);
+    const A = simulate(offerP(o, { tradesPerDay: tpd }), SEED), B = simulate(offerP(o, { tradesPerDay: tpd, ...cal }), SEED);
+    assert.deepStrictEqual(money(B), money(A), id + ' tpd ' + tpd);
+    assert.strictEqual(moneyList(B), moneyList(A), id + ' Zeilen');
+    if (id !== 'fn-rp-50') assert.ok(B.days.funded.calBlocks > 0, id + ' Kalender greift');
+    // Handelstage gleich, Tagesnummer und Kalendertag nie früher
+    assert.strictEqual(B.days.funded.tradingDays, A.days.funded.tradingDays, id);
+    B.list.forEach((x, i) => { assert.ok(x.days >= A.list[i].days, id); if (x.calToFirstPay !== null) assert.ok(x.calToFirstPay >= A.list[i].calToFirstPay, id); });
+    for (const a of B.accts) { const f = a.phases.funded; if (!f || f.firstPayDay === null) continue;
+      assert.ok(calDay(f.firstPayDay) >= calDay(f.firstDay) + cal.payFirstAfterCal, id + ' Wartezeit');
+      // mit Wartetagen: weniger Handelstage als Tage zwischen erstem und letztem Funded-Tag
+      if (f.calBlocks > 0) assert.ok(f.days < f.lastDay - f.firstDay + 1 || f.payDays.some(d => d > f.lastDay), id); }
+  }
+});
+
+test('M-005 Weitertraden: keine Auszahlung vor dem Freigabetag, calBlocks höchstens 1 pro Tag', () => {
+  // 48 h, 3 Trades pro Tag: Tag 1 und 2 blockiert (volle Tage), Auszahlung mit dem 1. Trade an Tag 3
+  const R = fundD({ payFirstAfterCal: 2, calCompliant: false }), f = R.accts[0].phases.funded;
+  assert.deepStrictEqual(f.dayPnl.slice(0, 3), [570, 570, 190]);
+  assert.deepStrictEqual([f.firstPayDay, f.calBlocks], [3, 2], 'Block an Tag 1 und 2, je Tag einmal trotz mehrerer blockierter Trades');
+  // Pause zum Vergleich: Tag 1 endet nach 2 Trades, Auszahlung an Tag 3 ohne Trade
+  const p = fundD({ payFirstAfterCal: 2 }).accts[0].phases.funded;
+  assert.deepStrictEqual([p.dayPnl[0], p.firstPayDay, p.calBlocks >= 1], [380, 3, true]);
+  for (const id of ['bg-cfd-1step-50', 'mf-pro-50']) {
+    const o = byId(id), B = simulate(offerP(o, { tradesPerDay: 3, ...withCal(o), calCompliant: false }), SEED);
+    for (const a of B.accts) { const g = a.phases.funded; if (!g) continue;
+      assert.ok(g.calBlocks <= g.days, id);
+      if (g.firstPayDay !== null) assert.ok(calDay(g.firstPayDay) >= calDay(g.firstDay) + o.payFirstAfterCal, id); }
+  }
+});
+
+test('M-005 Monatsabo: je weitere angefangene 30 Kalendertage, endet bei Bestehen oder Scheitern', () => {
+  // 1 Trade pro Tag à 190: Ziel 4.180 an Tag 22 (Kalendertag 30) → 1 Monat; 4.370 an Tag 23 (31) → 2 Monate
+  const run = over => simulate(det({ target: 4180, feeMonthly: 50, n: 3, ...over }), 1);
+  const A = run({}), B = run({ target: 4370 });
+  assert.deepStrictEqual([A.accts[0].phases.step1.days, A.list[0].feesPaid], [22, 100]);
+  assert.deepStrictEqual([B.accts[0].phases.step1.days, B.list[0].feesPaid], [23, 150]);
+  // Funded-Tage zählen nicht: Account läuft weit über 30 Kalendertage, Abo bleibt bei 1 bzw. 2 Monaten
+  assert.ok(B.list[0].calDays > 31);
+  // Scheitern: 110 $ Verlust je Trade, DD 3.000 → gescheitert an Tag 28 (Kalendertag 38) → 2 Monate
+  const F = simulate(det({ wr: 0, dd: 3000, feeMonthly: 50, n: 2 }), 1);
+  assert.deepStrictEqual([F.fail, F.list[0].days, F.list[0].calDays, F.list[0].feesPaid], [2, 28, 38, 150]);
+  // Instant: kein Abo
+  assert.strictEqual(fundD({ feeMonthly: 50 }).list[0].feesPaid, 100);
+  // Alpha Futures: feesPaid = fee × Monate, nie kleiner als fee
+  const o = byId('af-adv-50'), R = simulate(offerP(o, { ...withCal(o) }), SEED);
+  assert.ok(R.list.every(x => x.feesPaid >= o.fee && Number.isInteger(Math.round((x.feesPaid / o.fee) * 1e9) / 1e9)));
+  assert.ok(R.list.some(x => x.feesPaid > o.fee), 'mindestens ein Account zahlt mehr als einen Monat');
+});
+
+test('M-005 Aktivierung: nur bei bestandener Challenge, nie bei Instant', () => {
+  const P = simulate(det({ feeActivation: 30 }), 1), L = simulate(det({ wr: 0, feeActivation: 30 }), 1);
+  assert.ok(P.list.every(x => x.res !== 'fail' && x.feesPaid === 130));
+  assert.ok(L.list.every(x => x.res === 'fail' && x.feesPaid === 100));
+  assert.ok(fundD({ feeActivation: 30 }).list.every(x => x.feesPaid === 100));
+});
+
+test('M-005 Summen: R.fees = Σ feesPaid, netNo = pay − feesPaid je Zeile', () => {
+  for (const id of ['af-zero-25', 'af-adv-150', 'bg-cfd-1step-50']) {
+    const o = byId(id), R = simulate(offerP(o, { tradesPerDay: 1, ...withCal(o), feeActivation: 7 }), SEED);
+    const sum = R.list.reduce((a, x) => a + x.feesPaid, 0);
+    assert.ok(Math.abs(R.fees - sum) < 1e-6, id);
+    for (const x of R.list) assert.ok(Math.abs(x.netNo - (x.pay - x.feesPaid)) < 1e-9, id);
+    assert.ok(Math.abs(R.netNo - R.list.reduce((a, x) => a + x.netNo, 0)) < 1e-6, id);
+  }
+});
+
+test('M-005 Zusammenspiel: Tage und Kalender müssen beide erfüllt sein', () => {
+  // 2 Handelstage je Zyklus allein → Tag 2; 48 h allein → Tag 3; beide → Tag 3 (Auszahlung ohne Trade)
+  const d = fundD({ payMinDays: 2 }).accts[0].phases.funded, c = fundD({ payFirstAfterCal: 2 }).accts[0].phases.funded;
+  const b = fundD({ payMinDays: 2, payFirstAfterCal: 2 }).accts[0].phases.funded;
+  assert.deepStrictEqual([d.firstPayDay, c.firstPayDay, b.firstPayDay], [2, 3, 3]);
+  assert.deepStrictEqual(b.dayPnl.slice(0, 2), [380, 190]);
+  assert.ok(b.daysBlocks >= 1 && b.calBlocks >= 1);
+  // Consistency blockiert vor dem Kalender: Tage mit Consistency-Blockade zählen nicht als calBlocks
+  const k = fundD({ consFunded: 40, payFirstAfterCal: 1 }).accts[0].phases.funded, k0 = fundD({ consFunded: 40 }).accts[0].phases.funded;
+  assert.strictEqual(k.consBlocks, k0.consBlocks);
+  assert.strictEqual(k.calBlocks, 0, 'Consistency gibt erst nach dem Freigabetag frei');
+});
+
+test('M-005 Daten: Kalender- und Gebührenfelder aus rules, Anzahl je Anbieter, keine Inaktivitäts-Konflikte', () => {
+  const firm = g => g.split(' · ')[0] + (/^Blue Guardian · Futures/.test(g) ? ' Futures' : '');
+  const cnt = {};
+  for (const gr of OFFERS) for (const o of gr.items) {
+    const r = o.rules || {}, c = cnt[firm(gr.g)] = cnt[firm(gr.g)] || [0, 0, 0, 0];
+    for (const k of CAL_KEYS) assert.ok(typeof o[k] === 'number' && o[k] >= 0, o.id + ' ' + k);
+    if (o.payFirstAfterCal) c[0]++; if (o.payEveryCal) c[1]++; if (o.feeMonthly) c[2]++; if (o.feeActivation) c[3]++;
+    if (o.feeMonthly) assert.strictEqual(o.feeMonthly, r.price, o.id);
+    assert.strictEqual(o.feeMonthly > 0, r.billing === 'monthly', o.id);
+    if (r.inactivityDays != null) assert.ok(r.inactivityDays > Math.max(o.payFirstAfterCal, o.payEveryCal), o.id + ' Pause länger als Inaktivität');
+  }
+  assert.deepStrictEqual(cnt, {
+    'Alpha Futures': [0, 0, 9, 0], 'Lucid Trading': [0, 0, 0, 0], MyFundedFutures: [11, 0, 0, 0], 'FundedNext Futures': [3, 3, 0, 0],
+    'Alpha Capital': [0, 0, 0, 0], 'Blue Guardian': [22, 22, 0, 0], 'Blue Guardian Futures': [4, 0, 0, 0] });
+  // id: [payFirstAfterCal, payEveryCal, feeMonthly]
+  const EXP = { 'mf-rapid-50': [1, 0, 0], 'mf-builder-50': [2, 0, 0], 'mf-pro-50': [14, 0, 0], 'bg-fut-std-50': [3, 0, 0],
+    'bg-fut-express-50': [0, 0, 0], 'bg-cfd-instant-50': [0, 0, 0], 'bg-cfd-1step-50': [14, 14, 0], 'bg-cfd-1step-nano-50': [7, 7, 0],
+    'bg-cfd-2step-nano-50': [14, 14, 0], 'fn-rp-50': [3, 3, 0], 'fn-rd-50': [0, 0, 0], 'fn-direct-50': [0, 0, 0],
+    'af-std-50': [0, 0, 129], 'af-adv-150': [0, 0, 489], 'af-direct-50': [0, 0, 0], 'lu-direct-50': [0, 0, 0], 'ac-d-100': [0, 0, 0] };
+  for (const [id, e] of Object.entries(EXP)) assert.deepStrictEqual(CAL_KEYS.slice(0, 3).map(k => byId(id)[k]), e, id);
+  // PRESETS ohne neue Felder
+  for (const k of Object.keys(PRESETS)) for (const f of [...CAL_KEYS, 'calCompliant']) assert.strictEqual(PRESETS[k][f], undefined, k + ' ' + f);
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

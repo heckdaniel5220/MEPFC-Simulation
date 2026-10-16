@@ -55,7 +55,7 @@
       fee:offer.fee,dd:offer.dd,size:accountSize(offer),code:offer.code,codeMark:codeMark(offer,ctx.today),
       risk:P.risk,cost:P.cost,hp:P.hp,riskCapped:!!P.riskCapped,notTradable:!!P.notTradable,reason:P.reason||null,error:null,
       n:null,net:null,netLo:null,netHi:null,netHalf:null,netHe:null,netHeLo:null,netHeHi:null,netHeHalf:null,
-      roi:null,roiLo:null,roiHi:null,netPer1k:null,pass:null,payout:null,avgPayouts:null,days:null,q5NetHe:null,q5Hedge:null,
+      roi:null,roiLo:null,roiHi:null,feesPaid:null,netPer1k:null,pass:null,payout:null,avgPayouts:null,days:null,q5NetHe:null,q5Hedge:null,
       P};
   }
 
@@ -66,10 +66,13 @@
     const no=ci95(L.map(x=>x.netNo)), he=ci95(L.map(x=>x.netHe));
     // daysToFirstPay kommt mit M-004; fehlt das Feld, bleibt die Kennzahl null
     const days=L.map(x=>x.daysToFirstPay).filter(v=>v!==null && v!==undefined);
+    // ROI-Nenner (M-005): mittlere gezahlte Gebühren je Account (inkl. Monatsabo); fehlt feesPaid, gilt offer.fee
+    const paidFees=L.map(x=>x.feesPaid).filter(v=>typeof v==='number' && Number.isFinite(v));
+    const fees=paidFees.length===n && n>0 ? mean(paidFees) : offer.fee;
     Object.assign(row,{n,
       net:no.mean,netLo:no.lo,netHi:no.hi,netHalf:no.half,
       netHe:he.mean,netHeLo:he.lo,netHeHi:he.hi,netHeHalf:he.half,
-      roi:no.mean/offer.fee,roiLo:no.lo/offer.fee,roiHi:no.hi/offer.fee,
+      roi:no.mean/fees,roiLo:no.lo/fees,roiHi:no.hi/fees,feesPaid:fees,
       netPer1k:no.mean/P.dd*1000,
       pass:offer.mode==='instant'?null:R.passed/n,
       payout:R.paid/n,avgPayouts:R.nPayTot/n,
