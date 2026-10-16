@@ -383,4 +383,191 @@ test('M-001 Validierung: tradesPerDay 0, 1.5 und "2" werfen', () => {
   assert.strictEqual(prepare({ ...PRESETS.futures, tradesPerDay: 5 }).tradesPerDay, 5);
 });
 
+// ---- Daily Loss Limit (M-002) ----
+// core() (M-001) nimmt days und phases aus, damit auch dllStops, dllBreaches und dayDll.
+const ALL = OFFERS.flatMap(gr => gr.items);
+const byId = id => ALL.find(o => o.id === id);
+const DLL_KEYS = ['dllEval', 'dllFunded', 'dllType', 'dllScaleFunded', 'dllScaleFrom'];
+// Angebot mit den Trading-Parametern des Presets futures, Auto-Risiko wie in js/app.js
+const offerP = (o, over) => {
+  let risk = Math.max(10, Math.round(o.dd * 0.25 / 5) * 5); if (o.maxRisk) risk = Math.min(risk, o.maxRisk);
+  const f = PRESETS.futures;
+  return prepare({ mode: o.mode, fee: o.fee, target: o.target || f.target, target2: o.target2 || 0, dd: o.dd, ddStatic: !!o.ddStatic,
+    buf: o.buf, minp: o.minp, wfrac: o.wfrac, cap: o.cap, split: o.split, maxp: o.maxp,
+    risk, rr: f.rr, wr: f.wr, cost: Math.max(1, Math.round(risk * 0.02)), hfund: false, n: f.n,
+    hp: Math.min(30, Math.round(o.fee * 1.25 / o.dd * 200) / 2), ...over });
+};
+const withDll = o => Object.fromEntries(DLL_KEYS.map(k => [k, o[k]]));
+const money = R => [R.passed, R.paid, R.netNo, R.netHe, R.real, R.realMin];
+const VERGLEICH = ['mf-builder-50', 'lu-pro-50', 'af-zero-50', 'ac-one-50'];
+
+test('M-002 Golden: ohne DLL exakt die Baseline (tradesPerDay 1 und 3)', () => {
+  const zero = { dllEval: 0, dllFunded: 0, dllType: 'soft', dllScaleFunded: 0, dllScaleFrom: 0, dllCompliant: true };
+  for (const k of Object.keys(GOLD)) for (const tpd of [1, 3]) {
+    const R = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd }), SEED);
+    const Z = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...zero }), SEED);
+    assert.deepStrictEqual(kpi(R, 2000), GOLD[k], k + ' tpd ' + tpd);
+    assert.strictEqual(JSON.stringify(Z), JSON.stringify(R), k + ' explizit 0 = Default');
+    for (const ph of ['step1', 'step2', 'funded']) if (R.days[ph].n) assert.deepStrictEqual([R.days[ph].dllStops, R.days[ph].dllBreaches], [0, 0]);
+  }
+});
+
+test('M-002 Geld-Gleichheit: regeltreues DLL ändert keine Geld-Kennzahl', () => {
+  for (const id of VERGLEICH) {
+    const o = byId(id);
+    const A = simulate(offerP(o, { tradesPerDay: 3 }), SEED), B = simulate(offerP(o, { tradesPerDay: 3, ...withDll(o) }), SEED);
+    assert.deepStrictEqual(money(B), money(A), id);
+    assert.strictEqual(core(B), core(A), id + ' Gesamtergebnis ohne Tagesfelder');
+    assert.ok(B.days.step1.dllStops > 0, id + ' DLL greift');
+  }
+});
+
+test('M-002 Regeltreue: kein Tages-P&L erreicht −dll', () => {
+  let tage = 0;
+  for (const o of ALL.filter(o => o.dllEval > 0 || o.dllFunded > 0)) for (const tpd of [3, 6]) for (const seed of [SEED, 7, 99]) {
+    const R = simulate(offerP(o, { tradesPerDay: tpd, n: 12, ...withDll(o) }), seed);
+    for (const a of R.accts) for (const k of ['step1', 'step2', 'funded']) {
+      const ph = a.phases[k]; if (!ph) continue;
+      ph.dayPnl.forEach((x, i) => { const lim = ph.dayDll[i]; if (lim > 0) { tage++; assert.ok(x > -lim, `${o.id} ${k} ${x} vs ${lim}`); } });
+      if (k !== 'funded') assert.ok(ph.dayDll.every(l => l === o.dllEval), o.id);
+      else if (!o.dllScaleFunded) assert.ok(ph.dayDll.every(l => l === o.dllFunded), o.id);
+    }
+  }
+  assert.ok(tage > 10000, 'geprüfte Tage ' + tage);
+});
+
+test('M-002 Tagesstopp: Trade verweigert, Rest-Trades ziehen nichts, Folgetag normal', () => {
+  // Immer Verlust 110 $: dll 250 erlaubt 2 Trades (−220), der 3. würde −330 erreichen → verweigert
+  const a = simulate(det({ wr: 0, dllEval: 250, tradesPerDay: 3, n: 1 }), SEED).accts[0], s1 = a.phases.step1;
+  assert.strictEqual(a.trades, 19); // DD 2000 bricht beim 19. Trade, wie ohne DLL
+  assert.deepStrictEqual(s1.dayPnl, [...Array(9).fill(-220), -110]);
+  assert.strictEqual(s1.dllStops, 9); // Tag 10 endet durch den Drawdown
+  // Letzter Slot im Minus ist kein Stopp
+  const b = simulate(det({ wr: 0, dllEval: 250, tradesPerDay: 2, n: 1 }), SEED).accts[0];
+  assert.deepStrictEqual(b.phases.step1.dayPnl, [...Array(9).fill(-220), -110]);
+  assert.strictEqual(b.phases.step1.dllStops, 0);
+  // Genau −dll erreichen ist schon verboten: dll 220 erlaubt nur 1 Trade (−110 − 110 = −220)
+  const e = simulate(det({ wr: 0, dllEval: 220, tradesPerDay: 3, n: 1 }), SEED).accts[0].phases.step1;
+  assert.ok(e.dayPnl.every(x => x === -110)); assert.strictEqual(e.dllStops, e.days - 1);
+  // Mit Zufall: Tage aus derselben Zufallsfolge nachrechnen, verweigerte Trades ziehen keine Zahl
+  const { mulberry32 } = require('../js/sim.js');
+  const tpd = 3, P = prepare({ ...PRESETS.futures, target: 1e9, n: 1, tradesPerDay: tpd, dllEval: 1100 });
+  const x = simulate(P, SEED).accts[0], ph = x.phases.step1, r = mulberry32(SEED);
+  const pnl = []; let stops = 0, t = 0;
+  while (t < x.trades) {
+    let d = 0;
+    for (let k = 0; k < tpd && t < x.trades; k++) {
+      if (d - (P.risk + P.cost) <= -1100) { stops++; break; }
+      d += (r() < P.p ? P.risk * P.rr : -P.risk) - P.cost; t++;
+    }
+    pnl.push(d);
+  }
+  assert.deepStrictEqual(ph.dayPnl, pnl);
+  assert.strictEqual(ph.dllStops, stops);
+  assert.ok(stops > 0);
+});
+
+test('M-002 Eval und Funded getrennt', () => {
+  const P = over => prepare({ ...PRESETS.futures, n: 300, tradesPerDay: 5, ...over });
+  const E = simulate(P({ dllEval: 1100 }), SEED), F = simulate(P({ dllFunded: 1100 }), SEED);
+  assert.ok(E.days.step1.dllStops > 0); assert.strictEqual(E.days.funded.dllStops, 0);
+  assert.strictEqual(F.days.step1.dllStops, 0); assert.ok(F.days.funded.dllStops > 0);
+  assert.ok(E.accts.some(a => a.phases.funded && a.phases.funded.dayPnl.some(x => x <= -1100)), 'Funded ohne Limit');
+  assert.ok(E.accts.every(a => a.phases.step1.dayPnl.every(x => x > -1100)));
+  // Instant: dllEval wird nicht geprüft und wirkt nicht
+  const I = simulate(prepare({ ...PRESETS.instant, n: 100, tradesPerDay: 5, dllEval: 100 }), SEED);
+  assert.strictEqual(I.days.funded.dllStops, 0);
+});
+
+test('M-002 Lucid-Scaling: ab dllScaleFrom 0,6 × Peak-EOD, sinkt nie (auch nach Auszahlung)', () => {
+  // +190 $ je Trade, 1 Trade/Tag. EOD 190, 380, 570 (≥ 500 → Scaling), 760, 950; Tag 6: 1140 → Auszahlung → EOD 0
+  const a = simulate(det({ mode: 'instant', target: 0, dllFunded: 300, dllScaleFunded: 0.6, dllScaleFrom: 500,
+    minp: 1000, n: 1 }), SEED).accts[0], f = a.phases.funded;
+  assert.strictEqual(a.nPay, 3);
+  assert.deepStrictEqual(f.dayDll.slice(0, 12).map(Math.round), [300, 300, 300, 342, 456, 570, 570, 570, 570, 570, 570, 570]);
+  for (let i = 1; i < f.dayDll.length; i++) assert.ok(f.dayDll[i] >= f.dayDll[i - 1]);
+  // Daten: Lucid Direct 25k ohne Scaling, Pro 50k ab 2.100 $
+  assert.deepStrictEqual([byId('lu-direct-25').dllScaleFunded, byId('lu-direct-25').dllScaleFrom], [0, 0]);
+  assert.deepStrictEqual([byId('lu-pro-50').dllScaleFunded, byId('lu-pro-50').dllScaleFrom], [0.6, 2100]);
+  // Mit Zufall: Limit nie unter dllFunded, steigt nur
+  const o = byId('lu-pro-50');
+  let scaled = 0;
+  for (let seed = 1; seed <= 40; seed++) for (const x of simulate(offerP(o, { tradesPerDay: 3, n: 12, ...withDll(o) }), seed).accts) if (x.phases.funded) {
+    const d = x.phases.funded.dayDll;
+    d.forEach((l, i) => { assert.ok(l >= o.dllFunded); if (i) assert.ok(l >= d[i - 1]); if (l > o.dllFunded) scaled++; });
+  }
+  assert.ok(scaled, 'Scaling greift');
+});
+
+test('M-002 dllCompliant = false: soft beendet den Tag, hard Challenge bzw. Account', () => {
+  // Immer Verlust 110 $, dll 250: der 3. Trade erreicht −330
+  const soft = simulate(det({ wr: 0, dllEval: 250, dllCompliant: false, tradesPerDay: 4, n: 1 }), SEED).accts[0].phases.step1;
+  assert.deepStrictEqual(soft.dayPnl, [...Array(6).fill(-330), -110]);
+  assert.deepStrictEqual([soft.dllStops, soft.dllBreaches], [6, 0]);
+  // Bruch im letzten Slot: Tag endet ohnehin, kein Stopp
+  const last = simulate(det({ wr: 0, dllEval: 250, dllCompliant: false, tradesPerDay: 3, n: 1 }), SEED).accts[0].phases.step1;
+  assert.deepStrictEqual(last.dayPnl, [...Array(6).fill(-330), -110]);
+  assert.strictEqual(last.dllStops, 0);
+  // Genau −dll gilt als erreicht
+  const eq = simulate(det({ wr: 0, dllEval: 220, dllCompliant: false, tradesPerDay: 3, n: 1 }), SEED).accts[0].phases.step1;
+  assert.deepStrictEqual(eq.dayPnl.slice(0, 3), [-220, -220, -220]);
+  const h = simulate(det({ wr: 0, dllEval: 250, dllType: 'hard', dllCompliant: false, tradesPerDay: 4, n: 1 }), SEED).accts[0];
+  assert.strictEqual(h.passed, false); assert.strictEqual(h.trades, 3);
+  assert.deepStrictEqual([h.phases.step1.days, h.phases.step1.dllBreaches, h.phases.step1.dllStops], [1, 1, 1]);
+  assert.strictEqual(h.phases.funded, null);
+  // Funded (Instant): hard = Account verloren
+  const f = simulate(det({ mode: 'instant', target: 0, wr: 0, dllFunded: 250, dllType: 'hard', dllCompliant: false, tradesPerDay: 4, n: 1 }), SEED).accts[0];
+  assert.deepStrictEqual([f.blown, f.trades, f.nPay, f.phases.funded.dllBreaches], [true, 3, 0, 1]);
+  // Drawdown 300 bricht beim selben Trade (−330) → Drawdown gilt, kein DLL-Bruch
+  const d = simulate(det({ wr: 0, dd: 300, dllEval: 250, dllType: 'hard', dllCompliant: false, tradesPerDay: 4, n: 1 }), SEED).accts[0];
+  assert.deepStrictEqual([d.passed, d.trades, d.phases.step1.dllBreaches, d.phases.step1.dllStops], [false, 3, 0, 0]);
+  // Regeltreu ändert hard nichts: kein Bruch möglich
+  const o = byId('ac-one-50');
+  const C = simulate(offerP(o, { tradesPerDay: 3, ...withDll(o) }), SEED);
+  assert.strictEqual(C.days.step1.dllBreaches, 0);
+});
+
+test('M-002 Validierung: negative Werte, dllType, dllCompliant, risk + cost ≥ dll werfen', () => {
+  const f = PRESETS.futures; // risk 500 + cost 10 = 510
+  for (const k of ['dllEval', 'dllFunded', 'dllScaleFunded', 'dllScaleFrom']) {
+    assert.throws(() => prepare({ ...f, [k]: -1 }), new RegExp(k));
+    assert.throws(() => prepare({ ...f, [k]: '1000' }), new RegExp(k));
+    assert.throws(() => prepare({ ...f, [k]: NaN }), new RegExp(k));
+  }
+  assert.throws(() => prepare({ ...f, dllType: 'medium' }), /dllType/);
+  assert.throws(() => prepare({ ...f, dllCompliant: 'ja' }), /dllCompliant/);
+  assert.throws(() => prepare({ ...f, dllCompliant: 1 }), /dllCompliant/);
+  assert.throws(() => prepare({ ...f, dllEval: 510 }), /dllEval.*risk \+ cost/);
+  assert.throws(() => prepare({ ...f, dllFunded: 400 }), /dllFunded.*risk \+ cost/);
+  assert.throws(() => prepare({ ...f, dllScaleFunded: 0.6, dllScaleFrom: 500 }), /Scaling/);
+  assert.doesNotThrow(() => prepare({ ...f, dllEval: 511, dllFunded: 511, dllType: 'hard', dllCompliant: false }));
+  assert.doesNotThrow(() => prepare({ ...f, dllScaleFunded: 0.6, dllScaleFrom: 1000 }));
+  assert.doesNotThrow(() => prepare({ ...PRESETS.instant, dllEval: 100 })); // instant: kein dllEval
+  const P = prepare({ ...f });
+  assert.deepStrictEqual([P.dllEval, P.dllFunded, P.dllType, P.dllScaleFunded, P.dllScaleFrom, P.dllCompliant], [0, 0, 'soft', 0, 0, true]);
+});
+
+test('M-002 Daten: DLL-Kernfelder passen zu rules, 52 Angebote mit DLL', () => {
+  let n = 0;
+  for (const o of ALL) {
+    const r = o.rules || {};
+    for (const k of DLL_KEYS) assert.ok(k in o, o.id + ' ' + k);
+    assert.strictEqual(o.dllEval, o.mode === 'instant' ? 0 : (r.dlgEval ?? r.dailyDd ?? 0), o.id);
+    assert.strictEqual(o.dllFunded, r.dlgFunded ?? r.dailyDd ?? 0, o.id);
+    if (r.dlgEval != null && o.mode !== 'instant') assert.ok(o.dllEval > 0, o.id);
+    if (r.dlgFunded != null || r.dailyDd != null) assert.ok(o.dllFunded > 0, o.id);
+    assert.strictEqual(o.dllType, o.id.startsWith('ac-') ? 'hard' : 'soft', o.id);
+    if (o.dllScaleFunded > 0) {
+      assert.ok(o.id.startsWith('lu-') && r.dlgScaleFunded === 0.6, o.id);
+      assert.strictEqual(o.dllScaleFrom, r.trailBalance - Number(o.id.split('-').pop()) * 1000, o.id);
+    } else assert.deepStrictEqual([o.dllScaleFunded, o.dllScaleFrom, r.dlgScaleFunded ?? null], [0, 0, null], o.id);
+    assert.ok(!('dllCompliant' in o), o.id);
+    if (o.dllEval > 0 || o.dllFunded > 0) n++;
+    assert.doesNotThrow(() => offerP(o, withDll(o)), o.id);
+  }
+  assert.strictEqual(n, 52);
+  assert.strictEqual(ALL.filter(o => o.dllScaleFunded > 0).length, 7);
+  for (const p of Object.values(PRESETS)) for (const k of DLL_KEYS) assert.ok(!(k in p));
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
