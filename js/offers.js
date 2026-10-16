@@ -300,6 +300,19 @@
     {g:'Alpha Capital · CFD (NAS100, Gold) · einmalig', items:AC_ROWS.map(AC)}
   ];
 
+  // ---- Daily Loss Limit (M-002): Kernfelder aus rules ableiten ----
+  // dlgEval/dlgFunded (Futures, soft) bzw. dailyDd (Alpha Capital, hard). Instant hat keine Challenge, dllEval bleibt 0.
+  // Lucid-Scaling: Anteil aus rules.dlgScaleFunded, Schwelle = MLL + 100 $ (Trail-Balance − Kontogröße). dllCompliant bleibt Default (true).
+  for(const gr of OFFERS) for(const o of gr.items){
+    const r=o.rules||{}, scale=r.dlgScaleFunded??0;
+    Object.assign(o,{
+      dllEval:o.mode==='instant'?0:(r.dlgEval??r.dailyDd??0),
+      dllFunded:r.dlgFunded??r.dailyDd??0,
+      dllType:r.dailyDd!=null?'hard':'soft',
+      dllScaleFunded:scale,
+      dllScaleFrom:scale>0?r.mll+100:0});
+  }
+
   const api={PRESETS,OFFERS};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchData=api;
 })(typeof self!=='undefined'?self:this);
