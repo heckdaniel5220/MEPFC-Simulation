@@ -22,6 +22,7 @@
     <button type="button" id="p-edge" aria-pressed="false">Futures 50k mit echtem Edge</button>
     <button type="button" id="p-afstd" aria-pressed="false">Alpha Futures Standard 50k (~65 $)</button>
     <button type="button" id="p-instant" aria-pressed="false">Alpha Capital Direct 50k (97 $)</button>
+    <a class="btn jump" href="#rank">Zur Rangliste ↓</a>
   </div>
 
   <div class="grid">
@@ -66,6 +67,7 @@
         <div class="ctl"><div class="row"><label for="tradesPerDay">Trades pro Tag</label><output id="tradesPerDay-o"></output></div><input type="range" id="tradesPerDay" min="1" max="10" step="1" value="1"></div>
         <label class="check"><input type="checkbox" id="dllCompliant" checked> Daily Loss Limit regeltreu (keinen Trade eröffnen, der das Tageslimit reißen kann)</label>
         <label class="check"><input type="checkbox" id="consCompliant" checked> Consistency regeltreu (Tag beenden, wenn die Regel Ziel oder Auszahlung blockiert)</label>
+        <label class="check"><input type="checkbox" id="daysCompliant" checked> Tage-Regeln regeltreu (Tag beenden, wenn nur noch Handels- oder Gewinntage fehlen)</label>
         <small class="note" id="rule-hint"></small>
       </fieldset>
 
@@ -134,14 +136,40 @@
         <p class="note">Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung. Die ersten 12 Accounts (▸) lassen sich aufklappen: Tage je Phase und Tages-P&amp;L. Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
       </div>
 
-      <div class="warn">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft. Daily Loss Limit, Consistency, Gewinntage und Mindesttage der Angebote sind abgebildet, Auszahlungsrhythmen und Slippage nicht. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
+      <div class="warn" id="warn-model">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft. Daily Loss Limit, Consistency, Gewinntage und Mindesttage der Angebote sind abgebildet, Auszahlungsrhythmen und Slippage nicht. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
     </div>
   </div>
+
+  <section class="panel rank" id="rank" aria-labelledby="rank-h">
+    <h2 id="rank-h">Rangliste: welches Angebot passt zur eingestellten Strategie?</h2>
+    <p class="note">Rechnet alle Angebote mit Trefferquote, CRV, Trades pro Tag, Risiko- und Kosten-%, den Regeltreue-Schaltern und „Gegentrade danach weiterlaufen lassen“ aus dem Steuerpult. Alle Angebote laufen mit demselben Seed wie die Hauptsimulation. Ein Klick auf eine Zeile übernimmt das Angebot mit genau diesen Werten in die Hauptsimulation.</p>
+    <div class="rank-ctl">
+      <div class="ctl"><label for="rankN">Accounts je Angebot</label><span class="numbox"><input type="number" id="rankN" value="1000" min="10" max="5000" step="10" inputmode="numeric"></span></div>
+      <label class="check"><input type="checkbox" id="rankHedge" checked> mit Gegentrade (je Angebot kalibriert)</label>
+      <div class="btnrow"><button type="button" class="btn primary" id="rankGo">Rangliste berechnen</button><button type="button" class="btn" id="rankStop" hidden>Abbrechen</button></div>
+      <span class="note" id="rankProg" aria-live="polite"></span>
+    </div>
+    <p class="note" id="rankRiskHint"></p>
+    <div class="rank-filter" id="rankFilter" hidden>
+      <div class="ctl"><label for="fMarkt">Markt</label><select id="fMarkt" class="sel"><option value="all">Alle</option><option value="Futures">Futures</option><option value="CFD">CFD</option></select></div>
+      <div class="ctl"><label for="fFirma">Firma</label><select id="fFirma" class="sel"><option value="all">Alle</option></select></div>
+      <div class="ctl"><label for="fTyp">Typ</label><select id="fTyp" class="sel"><option value="all">Alle</option><option value="challenge">Challenge</option><option value="instant">Instant</option></select></div>
+      <div class="ctl"><label for="fFee">max. Fee</label><span class="numbox"><input type="number" id="fFee" min="0" step="10" inputmode="decimal" placeholder="–"><span class="unit">$</span></span></div>
+      <div class="ctl"><label for="fSizeMin">Kontogröße von</label><select id="fSizeMin" class="sel"><option value="">–</option></select></div>
+      <div class="ctl"><label for="fSizeMax">bis</label><select id="fSizeMax" class="sel"><option value="">–</option></select></div>
+    </div>
+    <div class="stale" id="rankStale" role="status" hidden>Strategie oder Seed geändert: Rangliste veraltet, neu berechnen. Ein Klick auf eine Zeile stellt die Werte der Berechnung wieder her.</div>
+    <div class="tbl" id="rankWrap" hidden><table id="rankTbl" class="list rank-tbl"></table></div>
+    <p class="note" id="rankCount"></p>
+    <p class="warn">Gilt nur für die eingestellte Strategie. Positive Werte können aus der Payout-Struktur der Firma kommen statt aus einem Trading-Edge. Modell mit Annahmen (CLAUDE.md). Keine Anlageberatung.</p>
+    <p class="note">Spanne = 95 % (± 1,96 × Standardfehler über die Accounts). „Gleichauf“ heißt: Die Spanne überlappt mit der von Platz 1 der gefilterten Liste (nur bei Netto und ROI). Überlappung ist ein strenger Maßstab, gleichauf heißt also nicht gleich gut. Gleicher Seed heißt nicht gleiche Kurse: Jedes Angebot braucht andere Trade-Zahlen, die Zufallsfolgen laufen deshalb auseinander. Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung.</p>
+  </section>
 </div>
 
 <script src="js/sim.js"></script>
 <script src="js/offers.js"></script>
 <script src="js/params.js"></script>
+<script src="js/rank.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
