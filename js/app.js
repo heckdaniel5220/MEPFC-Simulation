@@ -1,6 +1,7 @@
 /* Glitch-Simulator – Oberfläche (Regler, Angebotsauswahl, Kennzahlen, Chart, Tabellen). */
 (function(){
   const fmt0 = new Intl.NumberFormat('de-DE',{maximumFractionDigits:0});
+  const kTxt = v => new Intl.NumberFormat('de-DE',{maximumFractionDigits:1}).format(v/1000)+'k';
   const usd = v => (v<0?'−':'') + fmt0.format(Math.round(Math.abs(v))) + ' $';
   const sgn = v => (v>0?'+':v<0?'−':'') + fmt0.format(Math.round(Math.abs(v))) + ' $';
   const pct = v => fmt0.format(Math.round(v*100)) + ' %';
@@ -371,7 +372,7 @@
     const sizes=[...new Set(RK.rows.map(r=>r.size).filter(v=>v!==null))].sort((a,b)=>a-b);
     const keep=(id,opts,first)=>{ const el=$(id), v=el.value; el.innerHTML=first+opts; if([...el.options].some(o=>o.value===v)) el.value=v; };
     keep('fFirma',firms.map(f=>`<option value="${f}">${f}</option>`).join(''),'<option value="all">Alle</option>');
-    const so=sizes.map(v=>`<option value="${v}">${fmt0.format(v/1000)}k</option>`).join('');
+    const so=sizes.map(v=>`<option value="${v}">${kTxt(v)}</option>`).join('');
     keep('fSizeMin',so,'<option value="">–</option>'); keep('fSizeMax',so,'<option value="">–</option>');
     $('rankFilter').hidden=false;
   }
@@ -424,7 +425,7 @@
         : '–';
       const cell=(v,f)=>ok&&v!==null?f(v):'–';
       t+=`<tr class="clk${ok?'':' nt'}" data-id="${r.id}" tabindex="0" title="In die Hauptsimulation übernehmen">`
-        +`<td>${ok?place:'–'}</td><td class="txt firm">${r.firm}</td><td class="txt offer">${o?o.n:r.name}<span class="sub">${r.market} · ${r.type==='instant'?'Instant':'Challenge'}${r.size?' · '+fmt0.format(r.size/1000)+'k':''}</span></td>`
+        +`<td>${ok?place:'–'}</td><td class="txt firm">${r.firm}</td><td class="txt offer">${o?o.n:r.name}<span class="sub">${r.market} · ${r.type==='instant'?'Instant':'Challenge'}${r.size?' · '+kTxt(r.size):''}</span></td>`
         +`<td>${fee$(r.fee)}${feeSub}</td>`
         +`<td class="${ok?(r.net>=0?'pos':'neg'):''}">${ok?`${sgn(r.net)}<span class="sub">± ${usd(r.netHalf)}${hedge?` · mit Gegentrade ${sgn(r.netHe)}`:''}</span>`:'–'}</td>`
         +`<td>${cell(r.roi,pct0)}</td><td>${cell(r.netPer1k,sgn)}</td>`
