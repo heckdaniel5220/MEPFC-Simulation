@@ -172,10 +172,9 @@ test('MFFU-ids sind eindeutig', () => {
 // ---- FundedNext-Futures-Katalog (M-010d) ----
 const FN = OFFERS.find(gr => gr.g.startsWith('FundedNext')).items;
 
-test('FundedNext hat 7 Einträge, insgesamt 57 Angebote (56 − 6 + 7)', () => {
+test('FundedNext hat 7 Einträge', () => {
   assert.strictEqual(FN.length, 7);
   assert.deepStrictEqual(FN.map(o => o.id), ['fn-flex-50', 'fn-flex-100', 'fn-flex-150', 'fn-rp-25', 'fn-rp-50', 'fn-rp-100', 'fn-direct-50']);
-  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 57);
 });
 
 test('FundedNext-Einträge haben Quelle, Stand, Rohregeln und Code', () => {
@@ -210,6 +209,48 @@ test('alle ids eindeutig, keine FundedNext-Legacy-ids mehr', () => {
   const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
   assert.strictEqual(new Set(ids).size, ids.length);
   assert.ok(!ids.some(id => id.startsWith('fn-legacy-')), 'Legacy vorhanden');
+});
+
+// ---- Alpha-Capital-Katalog (M-010e) ----
+const AC = OFFERS.find(gr => gr.g.startsWith('Alpha Capital')).items;
+
+test('Alpha Capital hat 19 Einträge, insgesamt 66 Angebote (57 − 10 + 19)', () => {
+  assert.strictEqual(AC.length, 19);
+  assert.strictEqual(OFFERS.reduce((s, gr) => s + gr.items.length, 0), 66);
+});
+
+test('Alpha Capital: src, asof, rules, code und codeValidUntil je Eintrag', () => {
+  for (const o of AC) {
+    assert.ok(/^https:\/\/help\.alphacapitalgroup\.uk\//.test(o.src), o.id + ' src');
+    assert.strictEqual(o.asof, '2026-10-16', o.id + ' asof');
+    assert.ok(o.rules && typeof o.rules === 'object', o.id + ' rules');
+    assert.ok(o.code, o.id + ' code');
+    assert.strictEqual(o.rules.codeValidUntil, '2026-10-31', o.id + ' codeValidUntil');
+  }
+});
+
+test('Alpha Capital: Konsistenz von fee, dd, buf, split, ddStatic', () => {
+  for (const o of AC) {
+    assert.strictEqual(o.fee, o.rules.codePrice, o.id + ' fee');
+    assert.strictEqual(o.dd, o.rules.mll, o.id + ' dd');
+    if (o.id.startsWith('ac-d-')) assert.strictEqual(o.buf, o.rules.size * 0.03, o.id + ' buf');
+    assert.strictEqual(o.split, o.id.startsWith('ac-d-') ? 90 : 80, o.id + ' split');
+    if (o.id.startsWith('ac-pro6-')) assert.strictEqual(o.ddStatic, true, o.id + ' ddStatic');
+  }
+});
+
+test('Alpha Capital: Direct instant, One 1-Step, Pro 2-Step', () => {
+  for (const o of AC) {
+    if (o.id.startsWith('ac-d-')) { assert.strictEqual(o.mode, 'instant', o.id); assert.strictEqual(o.target, 0, o.id); }
+    else if (o.id.startsWith('ac-one-')) { assert.strictEqual(o.mode, 'challenge', o.id); assert.strictEqual(o.target2, 0, o.id); }
+    else { assert.ok(o.id.startsWith('ac-pro6-'), o.id); assert.strictEqual(o.mode, 'challenge', o.id); assert.ok(o.target2 > 0, o.id); }
+  }
+});
+
+test('alle ids eindeutig, keine Pro-10-%-ids mehr', () => {
+  const ids = OFFERS.flatMap(gr => gr.items.map(o => o.id));
+  assert.strictEqual(new Set(ids).size, ids.length);
+  assert.ok(!ids.some(id => id.startsWith('ac-pro10')), 'Pro 10 % vorhanden');
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
