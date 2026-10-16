@@ -1,8 +1,8 @@
 /* Glitch-Simulator – Oberfläche (Regler, Angebotsauswahl, Kennzahlen, Chart, Tabellen). */
 (function(){
   const fmt0 = new Intl.NumberFormat('de-DE',{maximumFractionDigits:0});
-  const usd = v => (v<0?'−':'') + fmt0.format(Math.abs(Math.round(v))) + ' $';
-  const sgn = v => (v>0?'+':v<0?'−':'') + fmt0.format(Math.abs(Math.round(v))) + ' $';
+  const usd = v => (v<0?'−':'') + fmt0.format(Math.round(Math.abs(v))) + ' $';
+  const sgn = v => (v>0?'+':v<0?'−':'') + fmt0.format(Math.round(Math.abs(v))) + ' $';
   const pct = v => fmt0.format(Math.round(v*100)) + ' %';
   const $ = id => document.getElementById(id);
 
@@ -12,14 +12,27 @@
   let seed = 20261015;
 
 
+  // Maßgeblich ist das Zahlenfeld; der Regler zeigt den Wert nur an (er rastet auf seine Schrittweite ein)
+  const num = s => parseFloat(String(s).replace(',','.'));
+  function val(k){
+    const ni=$(k+'-n'), v=ni?num(ni.value):NaN;
+    let x=isFinite(v)?v:parseFloat($(k).value);
+    // Anzahlen sind ganz und ≥ 1, sonst läuft die Schleife einen Account mehr (100,5 → 101)
+    if(k==='n'||k==='maxp') x=Math.max(1,Math.round(x));
+    return x;
+  }
   function read(){
     const P={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked};
-    IDS.forEach(k=>P[k]=parseFloat($(k).value));
+    IDS.forEach(k=>P[k]=val(k));
     return window.GlitchSim.prepare(P);
   }
   function apply(pr){
     $('mode').value=pr.mode; $('hfund').checked=!!pr.hfund; $('ddstatic').checked=!!pr.ddStatic;
-    IDS.forEach(k=>{ const v = pr[k]!==undefined ? pr[k] : (k==='target2'?0:$(k).value); $(k).value=v; });
+    IDS.forEach(k=>{
+      const v = pr[k]!==undefined ? pr[k] : (k==='target2'?0:val(k)), rg=$(k), ni=$(k+'-n');
+      if(v>parseFloat(rg.max)) rg.max=v;
+      rg.value=v; if(ni) ni.value=v;
+    });
   }
 
 
@@ -52,14 +65,11 @@
   function render(){
     const P=read();
     const instant=P.mode==='instant';
-    // Eingabefelder mit Reglern abgleichen (nicht überschreiben, während getippt wird)
-    IDS.forEach(k=>{const ni=$(k+'-n'); if(ni && document.activeElement!==ni) ni.value=$(k).value;});
     const be=1/(1+P.rr), beC=(P.risk+P.cost)/(P.risk*(1+P.rr));
     $('wr-hint').textContent=`Ohne Edge bei diesem CRV: ${fmt0.format(be*100)} %, mit Kosten ${fmt0.format(beC*100)} %. ${P.p>beC+0.005?'Über Break-even: Edge vorhanden.':P.p<be-0.005?'Unter Break-even: negativer Edge.':'Etwa Break-even: kein Edge.'}`;
     const calibH = instant ? P.fee/P.dd : P.fee/P.dd;
     $('hp-hint').textContent=`Fee genau zurück = Fee ÷ Drawdown = ${String((calibH*100).toFixed(1)).replace('.',',')} %. Etwas mehr bringt beim Verlieren einen kleinen Gewinn. 0 % = kein Gegentrade.`;
-    $('w-target').classList.toggle('dis',instant);
-    $('w-target2').classList.toggle('dis',instant);
+    ['target','target2'].forEach(k=>{ $('w-'+k).classList.toggle('dis',instant); $(k).disabled=instant; $(k+'-n').disabled=instant; });
 
     const R=simulate(P,seed);
     const n=P.n;
@@ -87,19 +97,22 @@
     drawChart(R,P);
 
     // seine rechnung
-    const his=0.5*2000-0.5*100;
+    const off=OFFER_BY[$('offer').value];
+    const won = instant ? Math.min(P.cap,P.minp*P.wf) : P.target;
+    const mine = 0.5*won-0.5*P.fee;
     const avgPayPassed = (instant? (R.paid? R.pay/R.paid:0) : (R.passed? R.pay/R.passed:0));
     $('calc').innerHTML=`
-      <div class="line"><span>Whiteboard: 50 % × 2.000 $ − 50 % × 100 $</span><span class="pos">+950 $</span></div>
+      <div class="line"><span>Whiteboard aus dem Video (fest): 50 % × 2.000 $ − 50 % × 100 $</span><span class="pos">+950 $</span></div>
+      <div class="line"><span>Dieselbe Formel für ${off?`<b>${off.firm} ${off.n}</b>`:'die eigenen Werte'}: 50 % × ${usd(won)} ${instant?'Auszahlungswert':'Ziel'} − 50 % × ${usd(P.fee)} Fee</span><span class="${mine>=0?'pos':'neg'}">${sgn(mine)}</span></div>
       <div class="line"><span>${instant?'Payout-Quote':'Pass-Quote'} in der Simulation (statt 50 %)</span><span>${pct(passRate)}</span></div>
       <div class="line"><span>Ø Auszahlung pro ${instant?'Account mit Payout':'bestandenem Account'} (statt 2.000 $)</span><span>${usd(avgPayPassed)}</span></div>
       ${instant?'':`<div class="line"><span>Bestandene Accounts ohne jede Auszahlung</span><span>${pct(R.passed? R.passNo/R.passed:0)}</span></div>`}
       <div class="line"><span>Echtes Ergebnis pro Account (ohne / mit Gegentrade)</span><span><span class="${R.netNo>=0?'pos':'neg'}">${sgn(R.netNo/n)}</span> / <span class="${R.netHe>=0?'pos':'neg'}">${sgn(R.netHe/n)}</span></span></div>
-      <p class="note">Seine Rechnung behandelt „bestanden“ wie 2.000 $ Gewinn. Tatsächlich ist der Drawdown nur Puffer, und Payouts sind gedeckelt und unsicher.</p>`;
+      <p class="note">${instant?'Auszahlungswert = 1. Auszahlung an der Schwelle: min(Max. pro Auszahlung, Mindestgewinn × auszahlbarer Anteil), vor Split. ':''}Seine Rechnung behandelt „bestanden“ wie 2.000 $ Gewinn. Tatsächlich ist der Drawdown nur Puffer, und Payouts sind gedeckelt und unsicher.</p>`;
 
     // flow table
     $('flow').innerHTML=`
-      <thead><tr><th></th><th>Ohne</th><th>Mit Gegentrade</th></tr></thead>
+      <thead><tr><th><span class="sr">Posten</span></th><th>Ohne</th><th>Mit Gegentrade</th></tr></thead>
       <tbody>
         <tr><td class="txt">Fees</td><td class="neg">${sgn(-R.fees)}</td><td class="neg">${sgn(-R.fees)}</td></tr>
         <tr><td class="txt">Payouts (nach Split)</td><td class="pos">${sgn(R.pay)}</td><td class="pos">${sgn(R.pay)}</td></tr>
@@ -112,14 +125,70 @@
       ? `${fmt0.format(R.fail+R.passNo)} von ${fmt0.format(n)} Accounts ohne Auszahlung verloren, ${fmt0.format(R.paid)} mit mindestens einer Auszahlung (insgesamt ${fmt0.format(R.nPayTot)} Auszahlungen).`
       : `${fmt0.format(R.fail)} von ${fmt0.format(n)} Challenges verloren, ${fmt0.format(R.passed)} bestanden. Davon ${fmt0.format(R.paid)} mit mindestens einer Auszahlung, ${fmt0.format(R.passNo)} vorher verloren.`;
 
-    // trace
-    let t=`<thead><tr><th>#</th><th>Ergebnis</th><th>Trades</th><th>Payouts</th><th>Echtgeld</th><th>Netto ohne</th><th>Netto mit</th></tr></thead><tbody>`;
-    R.accts.forEach((a,i)=>{
-      const st = !a.passed ? '<span class="pill fail">Challenge verloren</span>' : a.nPay>0 ? `<span class="pill paid">${a.nPay}× ausgezahlt</span>` : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
-      t+=`<tr><td>${i+1}</td><td class="txt">${st}</td><td>${a.trades}</td><td>${a.pay?sgn(a.pay):'–'}</td><td class="${a.hedge>=0?'pos':'neg'}">${P.h? sgn(a.hedge):'–'}</td><td class="${a.netNo>=0?'pos':'neg'}">${sgn(a.netNo)}</td><td class="${a.netHe>=0?'pos':'neg'}">${sgn(a.netHe)}</td></tr>`;
-    });
-    $('trace').innerHTML=t+'</tbody>';
+    last={R,P,instant};
+    renderList();
   }
+
+  // ---- Account-Tabelle: alle n Accounts, 50 pro Seite, Filter und Sortierung; nur die sichtbare Seite wird gebaut ----
+  const PAGE=50, RANK={fail:0,pass:1,paid:2};
+  const LS={sort:'i',dir:1,filter:'all',page:0,open:-1};
+  let last=null;
+  const COLS=[['i','#'],['res','Ergebnis'],['trades','Trades'],['days','Tage'],['pay','Payouts'],['hedge','Echtgeld'],['netNo','Netto ohne'],['netHe','Netto mit']];
+  const PHN={step1:'Step 1',step2:'Step 2',funded:'Funded'};
+  function filters(instant){
+    return instant
+      ? [['all','Alle'],['pass','Ohne Auszahlung verloren'],['paid','Mit Auszahlung']]
+      : [['all','Alle'],['fail','Verloren'],['pass','Bestanden ohne Auszahlung'],['paid','Mit Auszahlung']];
+  }
+  function pill(x,instant){
+    return x.res==='fail' ? '<span class="pill fail">Challenge verloren</span>'
+      : x.res==='paid' ? `<span class="pill paid">${x.nPay}× ausgezahlt</span>`
+      : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
+  }
+  function detail(a){
+    let h='<div class="det"><table><thead><tr><th>Phase</th><th>Tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th></tr></thead><tbody>';
+    let pnl='';
+    for(const k of ['step1','step2','funded']){
+      const ph=a.phases[k]; if(!ph) continue;
+      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td></tr>`;
+      const d=ph.dayPnl, more=d.length>40?` … (${fmt0.format(d.length)} Tage)`:'';
+      pnl+=`<p><b>${PHN[k]}</b> Tages-P&amp;L: ${d.slice(0,40).map(v=>`<span class="${v>0?'pos':v<0?'neg':''}">${sgn(v)}</span>`).join(' · ')}${more}</p>`;
+    }
+    h+=`</tbody></table>${pnl}<p>Echtgeld in der Absicherungsphase ${sgn(a.hedgeEval)}, danach ${sgn(a.hedgeFund)}.</p></div>`;
+    return h;
+  }
+  function renderList(){
+    if(!last) return;
+    const {R,P,instant}=last, list=R.list;
+    const cnt={all:list.length,fail:0,pass:0,paid:0}; list.forEach(x=>cnt[x.res]++);
+    const fl=filters(instant); if(!fl.some(f=>f[0]===LS.filter)) LS.filter='all';
+    $('lfilter').innerHTML=fl.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${LS.filter===k}">${l} <span class="num">${fmt0.format(cnt[k])}</span></button>`).join('');
+    let rows=LS.filter==='all'?list.slice():list.filter(x=>x.res===LS.filter);
+    const k=LS.sort, d=LS.dir;
+    rows.sort((x,y)=>{ const a=k==='res'?RANK[x.res]:x[k], b=k==='res'?RANK[y.res]:y[k]; return (a-b)*d || x.i-y.i; });
+    const pages=Math.max(1,Math.ceil(rows.length/PAGE)); if(LS.page>=pages) LS.page=pages-1;
+    const from=LS.page*PAGE, vis=rows.slice(from,from+PAGE);
+    let t='<thead><tr>'+COLS.map(([c,l])=>`<th aria-sort="${LS.sort===c?(d>0?'ascending':'descending'):'none'}"><button type="button" class="sort" data-k="${c}">${l}${LS.sort===c?(d>0?' ▲':' ▼'):''}</button></th>`).join('')+'</tr></thead><tbody>';
+    for(const x of vis){
+      const det=x.i<R.accts.length, open=det&&LS.open===x.i;
+      t+=`<tr${det?` class="clk${open?' open':''}" data-i="${x.i}" tabindex="0" aria-expanded="${open}"`:''}><td>${x.i+1}${det?'<span class="chev" aria-hidden="true"></span>':''}</td><td class="txt">${pill(x,instant)}</td><td>${fmt0.format(x.trades)}</td><td>${fmt0.format(x.days)}</td><td>${x.pay?sgn(x.pay):'–'}</td><td class="${x.hedge>=0?'pos':'neg'}">${P.h?sgn(x.hedge):'–'}</td><td class="${x.netNo>=0?'pos':'neg'}">${sgn(x.netNo)}</td><td class="${x.netHe>=0?'pos':'neg'}">${sgn(x.netHe)}</td></tr>`;
+      if(open) t+=`<tr class="detrow"><td colspan="8">${detail(R.accts[x.i])}</td></tr>`;
+    }
+    if(!vis.length) t+='<tr><td colspan="8" class="txt note">Keine Accounts in diesem Filter.</td></tr>';
+    $('trace').innerHTML=t+'</tbody>';
+    $('lpage').textContent=rows.length?`Accounts ${fmt0.format(from+1)}–${fmt0.format(from+vis.length)} von ${fmt0.format(rows.length)} · Seite ${LS.page+1} von ${pages}`:'0 Accounts';
+    $('lprev').disabled=LS.page<=0; $('lnext').disabled=LS.page>=pages-1;
+  }
+  $('lfilter').addEventListener('click',e=>{const b=e.target.closest('button[data-f]'); if(!b) return; LS.filter=b.dataset.f; LS.page=0; renderList();});
+  $('lprev').addEventListener('click',()=>{LS.page--; renderList();});
+  $('lnext').addEventListener('click',()=>{LS.page++; renderList();});
+  const toggle=tr=>{const i=+tr.dataset.i; LS.open=LS.open===i?-1:i; renderList();};
+  $('trace').addEventListener('click',e=>{
+    const b=e.target.closest('button[data-k]');
+    if(b){ const k=b.dataset.k; if(LS.sort===k) LS.dir=-LS.dir; else {LS.sort=k; LS.dir=k==='i'?1:-1;} LS.page=0; renderList(); return; }
+    const tr=e.target.closest('tr[data-i]'); if(tr) toggle(tr);
+  });
+  $('trace').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]'); if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault(); toggle(tr); const n=$('trace').querySelector(`tr[data-i="${tr.dataset.i}"]`); if(n) n.focus();}});
 
   // Zahlenfelder neben jeden Regler setzen
   const UNIT={fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:''};
@@ -133,30 +202,27 @@
     box.appendChild(ni);
     if(UNIT[k]){const u=document.createElement('span');u.className='unit';u.textContent=UNIT[k];box.appendChild(u);}
     out.replaceWith(box);
+    // Das Minimum nicht absenken: sonst verschiebt sich das Raster des Reglers (min 1, Schritt 10 → 101 statt 100)
     ni.addEventListener('input',()=>{
-      const v=parseFloat(String(ni.value).replace(',','.'));
+      const v=num(ni.value);
       if(!isFinite(v)) return;
       if(v>parseFloat(rg.max)) rg.max=v;
-      if(v<parseFloat(rg.min)) rg.min=v;
       rg.value=v;
     });
     rg.addEventListener('input',()=>{ni.value=rg.value;});
   });
-  // Presets können ebenfalls außerhalb der Reglergrenzen liegen
-  const applyOrig=apply;
-  apply=function(pr){IDS.forEach(k=>{const rg=$(k);if(pr[k]>parseFloat(rg.max))rg.max=pr[k];if(pr[k]<parseFloat(rg.min))rg.min=pr[k];});applyOrig(pr);IDS.forEach(k=>{const ni=$(k+'-n');if(ni)ni.value=$(k).value;});};
 
   const OFFER_BY={};
   (function fill(){
     const sel=$('offer');
     OFFERS.forEach(gr=>{const og=document.createElement('optgroup');og.label=gr.g;
-      gr.items.forEach(o=>{OFFER_BY[o.id]=o;const op=document.createElement('option');op.value=o.id;op.textContent=`${o.n} · ${fmt0.format(o.fee)} $`;og.appendChild(op);});
+      gr.items.forEach(o=>{OFFER_BY[o.id]=Object.assign({firm:gr.g.split(' · ')[0]},o);const op=document.createElement('option');op.value=o.id;op.textContent=`${o.n} · ${fmt0.format(o.fee)} $`;og.appendChild(op);});
       sel.appendChild(og);});
   })();
   function applyOffer(id){
     const o=OFFER_BY[id]; if(!o){ $('offer-note').textContent='Eigene Werte. Wähle ein Angebot, um Fee, Ziel, Drawdown und Payout-Regeln automatisch zu setzen.'; return; }
     const cur=read();
-    const pr={mode:o.mode,fee:o.fee,target:o.target||cur.target,target2:o.target2||0,dd:o.dd,ddStatic:!!o.ddStatic,buf:o.buf,minp:o.minp,wfrac:o.wfrac,cap:o.cap,split:o.split,maxp:o.maxp,
+    const pr={mode:o.mode,fee:o.fee,target:o.mode==='instant'?0:o.target,target2:o.mode==='instant'?0:(o.target2||0),dd:o.dd,ddStatic:!!o.ddStatic,buf:o.buf,minp:o.minp,wfrac:o.wfrac,cap:o.cap,split:o.split,maxp:o.maxp,
       risk:cur.risk,rr:cur.rr,wr:cur.wr,cost:cur.cost,hfund:false,n:cur.n,
       hp:Math.min(30,Math.round(o.fee*1.25/o.dd*200)/2)};
     if($('autorisk').checked){ pr.risk=Math.max(10,Math.round(o.dd*0.25/5)*5); if(o.maxRisk) pr.risk=Math.min(pr.risk,o.maxRisk); pr.cost=Math.max(1,Math.round(pr.risk*0.02)); }

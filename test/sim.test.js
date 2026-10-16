@@ -279,7 +279,7 @@ const GOLD = { // Seed 20261015, n = 2000, Stand main 2219cb7
 const kpi = (R, n) => [(R.netNo / n).toFixed(6), (R.netHe / n).toFixed(6), (R.passed / n).toFixed(4), (R.paid / n).toFixed(4)].map(Number);
 // Ergebnis ohne die neuen Tagesfelder, für den Vergleich verschiedener tradesPerDay
 const core = R => JSON.stringify({ ...R, days: 0, medianDaysToPass: 0,
-  accts: R.accts.map(a => ({ ...a, phases: 0 })) });
+  accts: R.accts.map(a => ({ ...a, phases: 0 })), list: (R.list || []).map(x => ({ ...x, days: 0 })) });
 // Deterministischer Trade: p = 1 (immer Gewinn) bzw. p = 0 (immer Verlust)
 const det = (over) => prepare({ mode: 'challenge', fee: 100, target: 1000, target2: 0, dd: 2000, risk: 100, rr: 2, wr: 100,
   cost: 10, hp: 5, hfund: false, buf: 0, minp: 300, wfrac: 100, cap: 100000, split: 90, maxp: 3, n: 20, ...over });
@@ -702,6 +702,34 @@ test('M-003 Daten: Consistency-Kernfelder passen zu rules, Anzahl je Anbieter', 
   }
   assert.deepStrictEqual(ALL.filter(o => o.consFundedMode === 'perpetual').map(o => o.id), ['fn-direct-50']);
   for (const p of Object.values(PRESETS)) for (const k of Object.keys(CONS_ZERO)) assert.ok(!(k in p));
+});
+
+// ---- Account-Liste (M-014) ----
+test('M-014 R.list: genau n Einträge, Summen stimmen mit netNo, netHe und real', () => {
+  for (const k of Object.keys(PRESETS)) for (const n of [1, 101, 2000]) {
+    const R = simulate(prepare({ ...PRESETS[k], n }), SEED);
+    assert.strictEqual(R.list.length, n, k + ' n ' + n);
+    assert.deepStrictEqual(R.list.map(x => x.i), [...Array(n).keys()], k);
+    let no = 0, he = 0, real = 0;
+    for (const x of R.list) { no += x.netNo; he += x.netHe; real += x.hedge; }
+    assert.strictEqual(no, R.netNo, k + ' netNo');
+    assert.strictEqual(he, R.netHe, k + ' netHe');
+    assert.ok(Math.abs(real - R.real) < 1e-6, k + ` real ${real} vs ${R.real}`);
+    // Die ersten 12 Zeilen gehören zu den Detail-Accounts
+    R.accts.forEach((a, i) => assert.deepStrictEqual([R.list[i].trades, R.list[i].nPay, R.list[i].netNo], [a.trades, a.nPay, a.netNo], k));
+  }
+});
+
+test('M-014 Zählung: verloren + mit Auszahlung + sonstige = n, passend zu fail/paid/passNo', () => {
+  for (const k of Object.keys(PRESETS)) for (const n of [10, 100, 101, 2000]) {
+    const R = simulate(prepare({ ...PRESETS[k], n }), SEED);
+    const c = { fail: 0, pass: 0, paid: 0 };
+    for (const x of R.list) c[x.res]++;
+    assert.strictEqual(c.fail + c.paid + c.pass, n, k);
+    assert.deepStrictEqual([c.fail, c.paid, c.pass], [R.fail, R.paid, R.passNo], k + ' n ' + n);
+    assert.strictEqual(R.fail + R.paid + R.passNo, n, k);
+    assert.strictEqual(R.cumNo.length, n + 1, k);
+  }
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
