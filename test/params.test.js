@@ -38,6 +38,26 @@ test('2. dll- und cons-Felder kommen an', () => {
   assert.ok(lu.dllFunded > 0 && lu.dllScaleFunded > 0 && lu.consFunded > 0);
 });
 
+test('M-004: Tage-Felder kommen über die generische Übernahme an (applyOffer und read)', () => {
+  const keys = ['evalMinDays', 'evalWinDays', 'evalWinDayMin', 'payMinDays', 'payWinDays', 'payWinDayMin'];
+  const withDays = ALL.filter(o => keys.some(k => o[k] > 0));
+  assert.ok(withDays.length > 0);
+  for (const o of ALL) {
+    const P = autoParams(o, STRAT), R = autoParams(o, uiOf(P));
+    for (const k of keys) { assert.strictEqual(P[k], o[k], o.id + ' ' + k); assert.strictEqual(R[k], o[k], o.id + ' read ' + k); }
+    assert.ok(!('daysCompliant' in R), o.id);
+  }
+});
+
+test('M-004: unerreichbare Gewinntag-Schwelle ergibt notTradable statt Absturz', () => {
+  const o = { ...byId('af-zero-25'), evalWinDays: 2, evalWinDayMin: 200 };
+  const P = autoParams(o, { ...STRAT, riskPct: 5 }); // 50 $ × 1,5 − 1 $ = 74 $ < 200 $
+  assert.strictEqual(P.notTradable, true); assert.ok(/200 \$.*74 \$/.test(P.reason));
+  assert.throws(() => prepare(P));
+  const ok = autoParams(o, { ...STRAT, riskPct: 5, tradesPerDay: 3 }); // 3 × 74 $ = 222 $
+  assert.ok(!ok.notTradable); prepare(ok);
+});
+
 test('3. Instant-Ziele sind 0', () => {
   const inst = ALL.filter(o => o.mode === 'instant');
   assert.ok(inst.length > 0);

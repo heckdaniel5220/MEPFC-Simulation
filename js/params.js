@@ -63,6 +63,16 @@
         P.reason=`Risiko + Kosten (${P.risk+P.cost} $) erreichen das Tageslimit (${lim} $). Kein Trade möglich. Risiko senken oder „Risiko & Kosten anpassen“ einschalten.`;
       }
     }
+    // Gewinntage (M-004): Schwelle, die selbst ein Tag nur mit Gewinn-Trades nicht erreicht, prüft prepare() ebenfalls
+    if(!P.notTradable && P.rr!==undefined){
+      const dayMax=(P.tradesPerDay||1)*(P.risk*P.rr-P.cost);
+      const miss=(n,x)=>n>0 && !(x>0 ? dayMax>=x : dayMax>0);
+      const x=P.mode==='challenge' && miss(P.evalWinDays,P.evalWinDayMin) ? P.evalWinDayMin : miss(P.payWinDays,P.payWinDayMin) ? P.payWinDayMin : null;
+      if(x!==null){
+        P.notTradable=true;
+        P.reason=`Gewinntag-Schwelle (${x} $) nicht erreichbar: höchster Tagesgewinn = Trades pro Tag × (Risiko × CRV − Kosten) = ${Math.round(dayMax*100)/100} $. Risiko oder Trades pro Tag erhöhen.`;
+      }
+    }
     return P;
   }
 
