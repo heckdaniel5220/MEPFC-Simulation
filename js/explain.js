@@ -72,7 +72,7 @@
     {key:'kosten',label:'Kosten',items:[
       {label:'Fee im Modell',core:'fee',raw:['codePrice','price'],unit:'$'},
       {label:'Listenpreis',core:'list',raw:['price'],unit:'Text'},
-      {label:'Code',core:'code',raw:[],unit:'Text',off:v=>v==='–'||!v},
+      {label:'Code',core:'code',raw:[],unit:'Text',off:v=>v==='–'||!v,offState:'no-code',offText:'kein belegter Code'},
       {label:'Code gültig bis',raw:['codeValidUntil'],unit:'Datum',fmt:v=>v===null?'ohne Ablaufdatum':deDate(v),nullIsValue:true},
       {label:'Code max. Einlösungen',raw:['codeMaxUses'],unit:'Anzahl'},
       {label:'Codepreis Folge-Accounts',raw:['codePriceFrom3rd'],unit:'$'},
@@ -185,7 +185,7 @@
     if(it.core){
       const v=o[it.core]; e.value=v;
       const off=it.always?false:it.activeIf?!it.activeIf(o):it.off?it.off(v):(v===0 || v===null || v===undefined || v==='');
-      if(off){ e.state='none-model'; e.text=noneText; return e; }
+      if(off){ e.state=it.offState||'none-model'; e.text=it.offText||noneText; return e; }
       e.state='value';
       if(it.zeroText && v===0) e.text=it.zeroText;
       else e.text=it.fmt?it.fmt(v):fmtVal(v,it.unit);
@@ -291,34 +291,57 @@
 
   function stripUi(ui){ const own={}; for(const k in (ui||{})) if(!RANK_KEYS.includes(k)) own[k]=ui[k]; return own; }
 
-  // Kennzahlen eines Laufs als Rangliste-Zeile (gleiche Rechnung wie rank.js)
-  function runRow(offer,P,seed,deps){ return deps.rank.rowFromResult(offer,P,deps.simulate(deps.prepare(P),seed),{}); }
-  const se=r=>r.netHalf/1.96;
+  // Ein Lauf: Rangliste-Zeile (gleiche Rechnung wie rank.js) plus Account-Liste für den gepaarten Vergleich
+  function run(offer,P,seed,deps){
+    const R=deps.simulate(deps.prepare(P),seed);
+    return {row:deps.rank.rowFromResult(offer,P,R,{}),list:R.list};
+  }
+  // Felder einer Account-Zeile, die für „identisch“ übereinstimmen müssen
+  const SAME_KEYS=['res','trades','days','daysToFirstPay','nPay','pay','netNo','calDays','calToFirstPay','feesPaid'];
+  const paid=x=>x.nPay>0?1:0;
 
-  // Gruppe gegen den Grundlauf: Δ = Netto ohne Regel − Netto mit Regel, ungepaarte 95-%-Spanne
-  function compare(base,alt){
-    const n0=base.n, n1=alt.n;
-    const d=alt.net-base.net, half=1.96*Math.sqrt(se(base)**2+se(alt)**2);
-    const money=alt.net===base.net && alt.netHalf===base.netHalf && alt.payout===base.payout && alt.avgPayouts===base.avgPayouts;
-    const same=money && alt.days===base.days && alt.calDays===base.calDays && alt.pass===base.pass;
-    const p0=base.payout, p1=alt.payout, dPay=p1-p0, payHalf=1.96*Math.sqrt(p0*(1-p0)/n0+p1*(1-p1)/n1);
-    const lo=money?0:d-half, hi=money?0:d+half;
+  // Gruppe gegen den Grundlauf: Δ = Netto ohne Regel − Netto mit Regel, 95-%-Spanne gepaart je Account.
+  // Gleicher Seed und gleiche Account-Reihenfolge: Account i beider Läufe ist ein Paar. Weichen die Läufe früh voneinander ab,
+  // ist die gepaarte Spanne praktisch gleich der ungepaarten (M-016a-Prüfung); bei fast gleichen Läufen ist sie enger und richtig.
+  function compare(b,a,ci95){
+    const B=b.list, A=a.list, n=B.length;
+    let nDiff=0, money=true;
+    for(let i=0;i<n;i++){
+      if(SAME_KEYS.some(k=>A[i][k]!==B[i][k])) nDiff++;
+      if(A[i].netNo!==B[i].netNo || A[i].nPay!==B[i].nPay) money=false;
+    }
+    const same=nDiff===0;
+    const dn=ci95(B.map((x,i)=>A[i].netNo-x.netNo)), dp=ci95(B.map((x,i)=>paid(A[i])-paid(x)));
+    const d=money?0:dn.mean, half=money?0:dn.half, dPay=money?0:dp.mean, payHalf=money?0:dp.half;
+    const lo=d-half, hi=d+half, payLo=dPay-payHalf, payHi=dPay+payHalf;
     const state=same?'same':(money || (lo<=0 && hi>=0))?'none':'binds';
     // Geld identisch, nur die Zeit verschiebt sich (z. B. Kalender mit Pause)
-    const payLo=money?0:dPay-payHalf, payHi=money?0:dPay+payHalf;
-    return {d:money?0:d,lo,hi,half:money?0:half,state,stateText:STATE[state]+(money && !same?' (nur Zeit)':''),moneyIdentical:money,timeOnly:money && !same,
-      dPay:money?0:dPay,payLo,payHi,payBinds:!(payLo<=0 && payHi>=0),
-      dDays:alt.days!==null && base.days!==null?alt.days-base.days:null,
-      dCalDays:alt.calDays!==null && base.calDays!==null?alt.calDays-base.calDays:null};
+    const timeOnly=money && !same;
+    const br=b.row, ar=a.row;
+    return {d,lo,hi,half,state,stateText:STATE[state]+(timeOnly?' (nur Zeit)':''),moneyIdentical:money,timeOnly,nDiff,n,
+      dPay,payLo,payHi,payBinds:!(payLo<=0 && payHi>=0),
+      dDays:ar.days!==null && br.days!==null?ar.days-br.days:null,
+      dCalDays:ar.calDays!==null && br.calDays!==null?ar.calDays-br.calDays:null};
   }
 
-  // ruleCosts(offer, ui, deps, row?): deps = {simulate, prepare, autoParams, rank}. row = Rangliste-Zeile mit gleichem ui und Seed (spart den Grundlauf).
+  // maxp ist eine Modellannahme, wenn die note es „Konvention“ nennt oder rules.maxPayouts keinen Wert hat
+  function maxpConvention(o){
+    const r=o.rules||{};
+    return /maxp \d+:?[^.]*Konvention/.test(o.note||'') || r.maxPayouts===undefined || r.maxPayouts===null;
+  }
+  const CONTROL_MAXP=1000;
+
+  // ruleCosts(offer, ui, deps, row?): deps = {simulate, prepare, autoParams, rank}.
+  // row = Rangliste-Zeile mit gleichem ui und Seed: P kommt aus row.P, der Grundlauf wird für die Account-Liste wiederholt und muss row.net treffen.
   function ruleCosts(offer,ui,deps,row){
     ui=ui||{};
     const seed=ui.seed!==undefined?ui.seed:SEED;
     const P=row?row.P:deps.autoParams(offer,stripUi(ui));
     if(P.notTradable || (row && (row.net===null || row.error))) return null;
-    const base=row||runRow(offer,P,seed,deps);
+    const b=run(offer,P,seed,deps), base=b.row;
+    if(row && base.net!==row.net) throw new Error(`Grundlauf ${offer.id}: Netto ${base.net} ≠ Rangliste ${row.net} (ui oder Seed verschieden)`);
+    const conv=maxpConvention(offer), ci95=deps.rank.ci95;
+    let bCtl=null;   // Grundlauf mit maxp 1000, nur bei Bedarf
     const groups=[];
     for(const G of GROUPS){
       if(!G.on(P)) continue;
@@ -330,15 +353,25 @@
         c={d,lo:d,hi:d,half:0,state:d!==0?'binds':'same',stateText:STATE[d!==0?'binds':'same'],moneyIdentical:d===0,exact:true,
           dPay:0,payLo:0,payHi:0,payBinds:false,dDays:0,dCalDays:0};
       } else {
-        const alt=runRow(offer,Object.assign({},P,G.off),seed,deps);
-        c=compare(base,alt); c.off=G.off;
+        const a=run(offer,Object.assign({},P,G.off),seed,deps);
+        c=compare(b,a,ci95); c.off=G.off;
+        // Negatives Δ und maxp nur Konvention: Kontrolllauf mit und ohne Regel, beide mit maxp 1000
+        if(c.state==='binds' && c.d<0 && conv){
+          if(!bCtl) bCtl=run(offer,Object.assign({},P,{maxp:CONTROL_MAXP}),seed,deps);
+          const k=compare(bCtl,run(offer,Object.assign({},P,G.off,{maxp:CONTROL_MAXP}),seed,deps),ci95);
+          c.control={maxp:CONTROL_MAXP,d:k.d,lo:k.lo,hi:k.hi,state:k.state,dPay:k.dPay};
+          // kippt das Vorzeichen oder schließt die Spanne 0 ein, folgt das negative Δ aus der Annahme maxp
+          c.maxpArtifact=!(k.state==='binds' && k.d<0);
+        }
       }
       groups.push(Object.assign({key:G.key,label:G.label,rule:G.rule(P,offer),analysis:ANALYSIS+(G.extra?' '+G.extra:'')},c));
     }
     const pos=groups.filter(g=>g.state==='binds' && g.d>0).sort((a,b)=>b.d-a.d);
-    const neg=groups.filter(g=>g.state==='binds' && g.d<0).sort((a,b)=>a.d-b.d);
-    return {id:offer.id,seed,n:base.n,base:{net:base.net,netLo:base.netLo,netHi:base.netHi,payout:base.payout,days:base.days,calDays:base.calDays,feesMean:base.feesMean},
-      groups,costliest:pos.length?pos[0].key:null,mostNegative:neg.length?neg[0].key:null};
+    const neg=groups.filter(g=>g.state==='binds' && g.d<0 && !g.maxpArtifact).sort((a,b)=>a.d-b.d);
+    const art=groups.filter(g=>g.maxpArtifact).sort((a,b)=>a.d-b.d);
+    return {id:offer.id,seed,n:base.n,maxp:P.maxp,maxpConvention:conv,
+      base:{net:base.net,netLo:base.netLo,netHi:base.netHi,payout:base.payout,days:base.days,calDays:base.calDays,feesMean:base.feesMean},
+      groups,costliest:pos.length?pos[0].key:null,mostNegative:neg.length?neg[0].key:null,maxpArtifact:art.length?art[0].key:null};
   }
 
   // Kosten für alle handelbaren Zeilen einer Rangliste (offers = OFFERS-Gruppen oder flache Liste)
@@ -395,26 +428,45 @@
     const P=row.P, loss=P.risk+P.cost, k=Math.ceil(P.dd/loss);
     return sentence('losses',[N(k,String(k),'derived'),k===1?' Verlust-Trade (':' Verlust-Trades in Folge (je ',N(loss,moneyData(loss),'derived'),k===1?') erreicht':') erreichen',' den Drawdown von ',N(P.dd,moneyData(P.dd),'row.P.dd'),'.']);
   }
+  // Beträge unter 10 $ mit Cent, damit fast gleiche Läufe nicht als „0 $“ erscheinen
+  const mny=v=>v!==0 && Math.abs(v)<10?num(v,2)+' $':money(v);
+  const sMny=v=>signed(mny(v),v);
+  // nur wenige Accounts verschieden: Anzahl nennen
+  const fewDiff=(g,p)=>g.nDiff!==undefined && g.nDiff>0 && g.nDiff<g.n/10
+    ?[', nur ',N(g.nDiff,num(g.nDiff),p+'.nDiff'),' von ',N(g.n,num(g.n),p+'.n'),' Accounts verschieden']:[];
+  function spanParts(lo,hi,p){ return [N(lo,mny(lo),p+'.lo'),' bis ',N(hi,mny(hi),p+'.hi')]; }
   function costParts(g,i){
     const p=`costs.groups.${i}`;
-    const parts=[N(g.d,sMoney(g.d),p+'.d'),' je Account'];
+    const parts=[N(g.d,sMny(g.d),p+'.d'),' je Account'];
     if(g.exact) parts.push(' (exakt aus den gezahlten Gebühren)');
-    else parts.push(' (Spanne ',N(g.lo,money(g.lo),p+'.lo'),' bis ',N(g.hi,money(g.hi),p+'.hi'),')');
+    else parts.push(' (Spanne ',...spanParts(g.lo,g.hi,p),...fewDiff(g,p),')');
     if(g.payBinds) parts.push(', Payout-Quote ',N(g.dPay,pp(g.dPay),p+'.dPay'),' Prozentpunkte (Spanne ',N(g.payLo,num(g.payLo*100,1),p+'.payLo'),' bis ',N(g.payHi,num(g.payHi*100,1),p+'.payHi'),')');
     return parts;
   }
+  // Kontrolllauf mit maxp 1000 (beide Läufe): Δ und Spanne
+  function controlParts(g,i){
+    const p=`costs.groups.${i}.control`;
+    return [N(g.control.d,sMny(g.control.d),p+'.d'),' je Account, Spanne ',...spanParts(g.control.lo,g.control.hi,p)];
+  }
+  const KEEP=['cons','cap','days','cal'];
   function s4(costs,row){
     if(!costs) return null;
-    const G=costs.groups;
-    const i=costs.costliest?G.findIndex(g=>g.key===costs.costliest):-1;
+    const G=costs.groups, at=k=>k?G.findIndex(g=>g.key===k):-1;
+    const i=at(costs.costliest);
     if(i>=0){ const g=G[i];
       return sentence('costliest',['Am meisten kostet ',g.rule,': im Modell abgeschaltet ',...costParts(g,i),'. ',g.analysis]); }
-    const j=costs.mostNegative?G.findIndex(g=>g.key===costs.mostNegative):-1;
-    if(j>=0){ const g=G[j], why=['cons','cap','days','cal'].includes(g.key)?', weil der Gewinn mit der Regel länger im Konto bleibt':', mit der Regel ist das Netto im Modell höher';
-      return sentence('negative',[g.rule,' kostet hier nichts: abgeschaltet ',...costParts(g,j),why,'. ',g.analysis]); }
+    const j=at(costs.mostNegative);
+    if(j>=0){ const g=G[j], why=KEEP.includes(g.key)?', weil der Gewinn mit der Regel länger im Konto bleibt':', mit der Regel ist das Netto im Modell höher';
+      const ctl=g.control?['; das gilt auch ohne Auszahlungsgrenze: mit max. ',N(g.control.maxp,num(g.control.maxp),`costs.groups.${j}.control.maxp`),' Auszahlungen ',...controlParts(g,j)]:[];
+      return sentence('negative',[g.rule,' kostet hier nichts: abgeschaltet ',...costParts(g,j),why,...ctl,'. ',g.analysis]); }
+    const m=at(costs.maxpArtifact);
+    if(m>=0){ const g=G[m];
+      return sentence('negativeMaxp',['Der negative Wert bei ',g.rule,' (abgeschaltet ',...costParts(g,m),') folgt hier vor allem aus der Modellannahme max. ',
+        N(row.P.maxp,String(row.P.maxp),'row.P.maxp'),' Auszahlungen (Konvention, keine Firmenregel): mit max. ',N(g.control.maxp,num(g.control.maxp),`costs.groups.${m}.control.maxp`),
+        ' Auszahlungen ändert das Abschalten das Netto um ',...controlParts(g,m),'. Ohne die Regel werden die Auszahlungen mit kleineren Beträgen verbraucht. ',g.analysis]); }
     const parts=['Keine der ',N(G.length,String(G.length),'derived'),' geprüften Regelgruppen ändert das Netto messbar (n = ',N(row.n,num(row.n),'row.n'),')'];
     // Payout-Quote mit eigener Spanne, wenn sie 0 ausschließt (größte Änderung)
-    let k=-1; G.forEach((g,i)=>{ if(g.payBinds && (k<0 || Math.abs(g.dPay)>Math.abs(G[k].dPay))) k=i; });
+    let k=-1; G.forEach((g,x)=>{ if(g.payBinds && (k<0 || Math.abs(g.dPay)>Math.abs(G[k].dPay))) k=x; });
     if(k>=0){ const g=G[k], p=`costs.groups.${k}`;
       parts.push('; die Payout-Quote ändert sich ohne ',g.rule,' um ',N(g.dPay,pp(g.dPay),p+'.dPay'),' Prozentpunkte (Spanne ',N(g.payLo,num(g.payLo*100,1),p+'.payLo'),' bis ',N(g.payHi,num(g.payHi*100,1),p+'.payHi'),'). ',g.analysis); }
     else parts.push('.');
@@ -433,8 +485,8 @@
     const i=costs.groups.findIndex(g=>g.key==='cap'); if(i<0) return null;
     const g=costs.groups[i], m=proxyCap(offer), P=row.P;
     const head=m?[proxyText(m),' (',N(P.cap,moneyData(P.cap),'row.P.cap'),')']:['Cap ',N(P.cap,moneyData(P.cap),'row.P.cap'),' je Auszahlung'];
-    if(g.state==='same') return sentence('cap',[...head,': wirkt nicht (Ergebnis identisch).']);
-    if(g.state==='none') return sentence('cap',[...head,': bindet nicht messbar (Spanne ',N(g.lo,money(g.lo),`costs.groups.${i}.lo`),' bis ',N(g.hi,money(g.hi),`costs.groups.${i}.hi`),').']);
+    if(g.state==='same') return sentence('cap',[...head,': wirkt nicht (alle ',N(g.n,num(g.n),`costs.groups.${i}.n`),' Accounts identisch).']);
+    if(g.state==='none') return sentence('cap',[...head,': bindet nicht messbar (Δ ',N(g.d,sMny(g.d),`costs.groups.${i}.d`),', Spanne ',...spanParts(g.lo,g.hi,`costs.groups.${i}`),...fewDiff(g,`costs.groups.${i}`),').']);
     return sentence('cap',[...head,m?': ohne Proxy ':': ohne Cap ',...costParts(g,i),'. ',g.analysis]);
   }
   function s6(row){
@@ -509,17 +561,20 @@
       let costliest=null;
       if(costsByOffer){
         // none: keine Gruppe bindet; negative: nur eine Regel bindet, die im Modell mehr Netto bringt
-        const counts={}, negCounts={}; let none=0, negative=0, seen=0;
+        // maxpModel: negatives Δ nur wegen der Modellannahme maxp (Kontrolllauf), zählt nicht als „mehr Netto“
+        const counts={}, negCounts={}; let none=0, negative=0, maxpModel=0, seen=0;
         for(const r of T){ const c=costsByOffer[r.id]; if(!c) continue; seen++;
           if(c.costliest) counts[c.costliest]=(counts[c.costliest]||0)+1;
           else if(c.mostNegative){ negative++; negCounts[c.mostNegative]=(negCounts[c.mostNegative]||0)+1; }
+          else if(c.maxpArtifact) maxpModel++;
           else none++; }
         const topOf=m=>Object.entries(m).sort((a,b)=>b[1]-a[1]||(a[0]<b[0]?-1:1))[0]||null;
         const top=topOf(counts), negTop=topOf(negCounts);
-        costliest={counts,none,negative,negCounts,n:seen,top:top?top[0]:null,topCount:top?top[1]:0,negTop:negTop?negTop[0]:null};
+        costliest={counts,none,negative,negCounts,maxpModel,n:seen,top:top?top[0]:null,topCount:top?top[1]:0,negTop:negTop?negTop[0]:null};
         const cnt=(v,src)=>[N(v,String(v),src),v===1?' Angebot':' Angeboten'];
         const parts=['Bei ',N(none,String(none),'type.costliest.none'),' von ',N(seen,String(seen),'type.costliest.n'),' Angeboten bindet keine Regel messbar'];
         if(negative) parts.push('; bei ',...cnt(negative,'type.costliest.negative'),' bringt eine Regel im Modell mehr Netto (am häufigsten ',GROUP_LABEL[negTop[0]],')');
+        if(maxpModel) parts.push('; bei ',...cnt(maxpModel,'type.costliest.maxpModel'),' folgt ein negativer Wert aus der Modellannahme max. Auszahlungen (Konvention)');
         if(top) parts.push('; die teuerste Regel ist am häufigsten ',GROUP_LABEL[top[0]],' (',N(top[1],String(top[1]),'type.costliest.topCount'),top[1]===1?' Angebot)':' Angebote)');
         parts.push('.');
         sentences.push(sentence('typeCost',parts));
@@ -531,7 +586,7 @@
   }
 
   const api={ruleSheet,challengeType,ruleCosts,ruleCostsForRows,strategyFit,typeSummary,
-    placeOf,classify,splitNote,rawKeyGroups,rowTypeKey,proxyCap,
+    placeOf,classify,splitNote,rawKeyGroups,rowTypeKey,proxyCap,maxpConvention,
     SHEET,REST_KEYS,GROUPS,PROXY_CAPS,TYPE_KEYS,DISCLAIMER,ANALYSIS,STATE};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchExplain=api;
 })(typeof self!=='undefined'?self:this);

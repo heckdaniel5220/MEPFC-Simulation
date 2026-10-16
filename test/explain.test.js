@@ -85,6 +85,8 @@ test('1 ruleSheet: je Anbieter exakt die Datenwerte, fehlende Werte „keine Ang
   assert.deepStrictEqual([e.state, e.text], ['missing', 'keine Angabe']);
   e = entry('af-zero-25', 'kosten', 'Monatsabo (je weitere 30 Kalendertage)');
   assert.deepStrictEqual([e.value, e.text], [89, '89 $']);
+  e = entry('af-zero-25', 'kosten', 'Code');
+  assert.deepStrictEqual([e.state, e.text, e.value], ['no-code', 'kein belegter Code', '–']);
   e = entry('ac-d-50', 'tageslimit', 'Funded');
   assert.deepStrictEqual([e.value, e.from, e.fromValue], [1500, 'rules.dailyDd', 1500]);
   e = entry('ac-d-50', 'auszahlung', 'Cap je Auszahlung');
@@ -203,26 +205,88 @@ test('3b Kalender (nur Zeit bei Pause) und Monatsabo (exakt aus feesPaid)', () =
   assert.ok(!ruleCosts(byId('lu-flex-50'), UI, deps).groups.some(g => g.key === 'fee' || g.key === 'cal'));
 });
 
-test('4 „bindet nicht messbar“, „bindet“ und „identisch“ an konstruierten Läufen', () => {
-  // Stub: netNo-Liste hängt nur vom cap ab, base streut ±1000, Abschalten verschiebt um shift
-  const mk = shift => ({
+// Stub-Läufe: Account-Liste hängt nur von cap und maxp ab (Grundlauf cap 1000, abgeschaltet cap 100000)
+function stubDeps(altNet, opts = {}) {
+  return {
     simulate: P => {
-      const L = []; for (let i = 0; i < 100; i++) L.push({ netNo: (i % 2 ? 1000 : -1000) + (P.cap === 100000 ? shift : 0), netHe: 0, hedge: 0, daysToFirstPay: null, calToFirstPay: null, feesPaid: 100 });
-      return { list: L, passed: 50, paid: 0, nPayTot: 0 };
+      const L = [];
+      for (let i = 0; i < 100; i++) {
+        const base = i % 2 ? 1000 : -1000;
+        const v = P.cap === 100000 ? altNet(i, base, P) : base;
+        L.push({ i, res: 'pass', trades: 10, days: 5, daysToFirstPay: null, nPay: 0, pay: 0, hedge: 0, netNo: v, netHe: v, calDays: 7, calToFirstPay: null, feesPaid: 100 });
+      }
+      return { list: L, passed: 100, paid: 0, nPayTot: 0 };
     },
     prepare: P => P, autoParams: (o, ui) => Object.assign({}, o, ui, { hp: 5 }), rank: Rank
-  });
-  const o = { id: 'x-1', n: 'X', mode: 'challenge', fee: 100, dd: 2000, cap: 1000, target: 3000, risk: 100, cost: 1 };
-  const g = s => ruleCosts(o, { n: 100 }, mk(s)).groups.find(x => x.key === 'cap');
-  // SE je Lauf = 1000·√(100/99)/10 ≈ 100,5; Spanne Δ ≈ ±278
-  assert.strictEqual(g(100).state, 'none'); assert.strictEqual(g(100).stateText, 'bindet nicht messbar');
-  assert.ok(g(100).lo < 0 && g(100).hi > 0);
-  assert.strictEqual(g(400).state, 'binds'); assert.ok(g(400).lo > 0);
-  assert.strictEqual(g(-400).state, 'binds'); assert.ok(g(-400).hi < 0);
-  assert.strictEqual(g(0).state, 'same'); assert.strictEqual(g(0).d, 0);
-  const c = ruleCosts(o, { n: 100 }, mk(400));
+  };
+}
+const stubOffer = extra => Object.assign({ id: 'x-1', n: 'X', mode: 'challenge', fee: 100, dd: 2000, cap: 1000, maxp: 5, target: 3000, risk: 100, cost: 1, note: 'Annahmen: maxp 5 Konvention.', rules: {} }, extra);
+const capOf = (o, deps) => ruleCosts(o, { n: 100 }, deps).groups.find(x => x.key === 'cap');
+
+test('4 „bindet nicht messbar“, „bindet“ und „identisch“ an konstruierten Läufen (gepaarte Spanne)', () => {
+  // abgeschaltet: Vorzeichen je Account getauscht plus shift → Differenzen ±2.000 + shift, SE ≈ 201, Spanne ≈ ±394
+  const flip = shift => stubDeps((i, b) => -b + shift);
+  const o = stubOffer();
+  let g = capOf(o, flip(100));
+  assert.strictEqual(g.state, 'none'); assert.strictEqual(g.stateText, 'bindet nicht messbar');
+  assert.ok(g.lo < 0 && g.hi > 0); near(g.d, 100, 1e-9);
+  g = capOf(o, flip(600)); assert.strictEqual(g.state, 'binds'); assert.ok(g.lo > 0);
+  g = capOf(o, flip(-600)); assert.strictEqual(g.state, 'binds'); assert.ok(g.hi < 0);
+  // identische Läufe → „wirkt nicht (identisch)“ mit Spanne 0
+  g = capOf(o, stubDeps((i, b) => b));
+  assert.deepStrictEqual([g.state, g.stateText, g.d, g.lo, g.hi, g.half, g.nDiff, g.dPay], ['same', 'wirkt nicht (identisch)', 0, 0, 0, 0, 0, 0]);
+  // nur ein Account verschieden (wie af-std-50, Cap, WR 46 %): gepaart winzige Spanne um ein kleines Δ, nicht ±179 $
+  g = capOf(o, stubDeps((i, b) => (i === 7 ? b + 9.56 : b)));
+  assert.strictEqual(g.state, 'none'); assert.strictEqual(g.nDiff, 1);
+  near(g.d, 0.0956, 1e-9); assert.ok(g.hi - g.lo < 0.5, `Spanne ${g.lo} bis ${g.hi}`);
+  // Konstante Verschiebung aller Accounts: gepaart sicher
+  g = capOf(o, stubDeps((i, b) => b + 5)); assert.strictEqual(g.state, 'binds'); assert.strictEqual(g.half, 0);
+  const c = ruleCosts(o, { n: 100 }, flip(600));
   assert.strictEqual(c.costliest, 'cap'); assert.strictEqual(c.mostNegative, null);
-  assert.strictEqual(ruleCosts(o, { n: 100 }, mk(-400)).mostNegative, 'cap');
+});
+
+test('4b Kontrolllauf maxp 1000 bei negativem Δ: kippt → Modellannahme, stabil → „auch ohne Auszahlungsgrenze“', () => {
+  // abgeschaltet: −800 je Account bei maxp 5; mit maxp 1000 je nach Fall 0 (kippt) oder −800 (stabil); Rauschen ±2.000 je Account
+  const deps = ctl => stubDeps((i, b, P) => -b + (P.maxp === 1000 ? ctl : -800));
+  const o = stubOffer();
+  assert.strictEqual(Ex.maxpConvention(o), true);
+  let c = ruleCosts(o, { n: 100 }, deps(0)), g = c.groups.find(x => x.key === 'cap');
+  assert.strictEqual(g.state, 'binds'); assert.ok(g.d < 0);
+  assert.strictEqual(g.control.maxp, 1000); assert.strictEqual(g.control.state, 'none'); assert.strictEqual(g.maxpArtifact, true);
+  assert.strictEqual(c.mostNegative, null); assert.strictEqual(c.maxpArtifact, 'cap');
+  c = ruleCosts(o, { n: 100 }, deps(-800)); g = c.groups.find(x => x.key === 'cap');
+  assert.strictEqual(g.maxpArtifact, false); assert.ok(g.control.d < 0);
+  assert.strictEqual(c.mostNegative, 'cap'); assert.strictEqual(c.maxpArtifact, null);
+  // maxp laut Quelle (rules.maxPayouts) → kein Kontrolllauf
+  const of = stubOffer({ note: 'Annahmen: keine.', rules: { maxPayouts: 5 } });
+  assert.strictEqual(Ex.maxpConvention(of), false);
+  g = ruleCosts(of, { n: 100 }, deps(0)).groups.find(x => x.key === 'cap');
+  assert.strictEqual(g.control, undefined); assert.strictEqual(g.maxpArtifact, undefined);
+  // Daten: maxp-Konvention genau bei Alpha Futures, Lucid Pro/Daily, MFFU Rapid, Alpha Capital, Blue Guardian (13 + 8 + 4 + 19 + 46)
+  assert.strictEqual(ALL.filter(({ o: x }) => Ex.maxpConvention(x)).length, 90);
+  assert.strictEqual(Ex.maxpConvention(byId('lu-direct-25')), false);
+  assert.strictEqual(Ex.maxpConvention(byId('mf-pro-50')), false);
+});
+
+test('4c Sätze zum Kontrolllauf an echten Angeboten (WR 46 %)', () => {
+  const ui = { wr: 46, rr: 1.5, n: 1000 };
+  const rows = Rank.rankOffers(OFFERS, ui, deps);
+  let flipped = 0, stable = 0;
+  for (const id of ['ac-d-50', 'bg-cfd-instant-200', 'lu-direct-25', 'ac-pro6-50', 'bg-fut-std-50']) {
+    const o = byId(id), row = rows.find(r => r.id === id), costs = ruleCosts(o, ui, deps, row), f = strategyFit(o, ui, row, costs, rows);
+    for (const s of [...f.reasons, ...f.more]) checkSentence(s, { row, costs, offer: o, fit: f });
+    const s4 = f.reasons.find(s => ['costliest', 'negative', 'negativeMaxp', 'noBind'].includes(s.key));
+    for (const g of costs.groups) if (g.control) { if (g.maxpArtifact) flipped++; else stable++; }
+    if (costs.maxpArtifact && !costs.mostNegative && !costs.costliest) {
+      assert.strictEqual(s4.key, 'negativeMaxp'); assert.ok(s4.text.includes('Modellannahme max. 5 Auszahlungen (Konvention, keine Firmenregel)'), s4.text);
+    }
+    if (costs.mostNegative && !costs.costliest) {
+      const g = costs.groups.find(x => x.key === costs.mostNegative);
+      assert.strictEqual(s4.key, 'negative');
+      assert.strictEqual(s4.text.includes('auch ohne Auszahlungsgrenze'), !!g.control, s4.text);
+    }
+  }
+  assert.ok(flipped + stable > 0, 'kein Kontrolllauf');
 });
 
 // Konstruierte Zeilen: netPer1k = net / dd · 1.000, dd 1.000
@@ -286,7 +350,7 @@ test('7 typeSummary an Stub-Zeilen', () => {
   const f = t.types[0];
   assert.strictEqual(f.n, 3); assert.strictEqual(f.medianPer1k, 290); assert.strictEqual(f.medianNet, 290); assert.strictEqual(f.medianPayout, 0.2);
   assert.deepStrictEqual(f.best, { id: 'f1', name: 'F1', netPer1k: 300, ties: 1 });
-  assert.deepStrictEqual(f.costliest, { counts: { cons: 2 }, none: 0, negative: 1, negCounts: { cap: 1 }, n: 3, top: 'cons', topCount: 2, negTop: 'cap' });
+  assert.deepStrictEqual(f.costliest, { counts: { cons: 2 }, none: 0, negative: 1, negCounts: { cap: 1 }, maxpModel: 0, n: 3, top: 'cons', topCount: 2, negTop: 'cap' });
   assert.ok(f.sentences[2].text.includes('bei 1 Angebot bringt eine Regel im Modell mehr Netto (am häufigsten Cap)'), f.sentences[2].text);
   assert.strictEqual(t.types[1].label, '2-Step · CFD (alle CFD, statischer DD)');
   assert.ok(t.types[2].sentences[0].text.includes('passt besser'));
