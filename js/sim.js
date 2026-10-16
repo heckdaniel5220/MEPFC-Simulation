@@ -67,6 +67,22 @@
     }
     if(P.calCompliant===undefined) P.calCompliant=true;
     if(typeof P.calCompliant!=='boolean') throw new Error('calCompliant muss true oder false sein: '+JSON.stringify(P.calCompliant));
+    // Slippage (M-017): Zusatzverlust am Stop-Loss in % von risk, nur bei Verlust-Trades, 'none' = aus
+    if(P.slipMode===undefined) P.slipMode='none';
+    if(!['none','fixed','dist'].includes(P.slipMode)) throw new Error("slipMode muss 'none', 'fixed' oder 'dist' sein: "+JSON.stringify(P.slipMode));
+    for(const k of ['slipPct','slipTailPct','slipBuffer']){
+      if(P[k]===undefined) P[k]=0;
+      if(typeof P[k]!=='number' || !Number.isFinite(P[k]) || P[k]<0) throw new Error(k+' muss eine Zahl ≥ 0 sein: '+JSON.stringify(P[k]));
+    }
+    if(P.slipTailProb===undefined) P.slipTailProb=0;
+    if(typeof P.slipTailProb!=='number' || !Number.isFinite(P.slipTailProb) || P.slipTailProb<0 || P.slipTailProb>=1) throw new Error('slipTailProb muss eine Zahl in [0, 1) sein: '+JSON.stringify(P.slipTailProb));
+    // Puffer: der regeltreue Trader plant risk × (1 + slipBuffer/100) + cost ein; erreicht das ein Limit, wäre kein Trade erlaubt
+    if(P.slipBuffer>0){
+      const lb=P.risk*(1+P.slipBuffer/100)+P.cost, chkB=(name,v)=>{ if(v>0 && lb>=v) throw new Error(`${name} (${v} $) muss größer sein als risk × (1 + slipBuffer/100) + cost (${lb} $), sonst ist kein Trade erlaubt`); };
+      if(P.mode==='challenge') chkB('dllEval',P.dllEval);
+      chkB('dllFunded',P.dllFunded);
+      if(P.dllScaleFunded>0) chkB('Scaling: max(dllFunded, dllScaleFunded × dllScaleFrom)',Math.max(P.dllFunded,P.dllScaleFunded*P.dllScaleFrom));
+    }
     P.p=P.wr/100; P.h=P.hp/100; P.wf=P.wfrac/100; P.sp=P.split/100;
     return P;
   }
@@ -98,39 +114,57 @@
      + payFirstAfterCal bzw. der letzten Auszahlung + payEveryCal (als Letztes geprüft). Blockiert nur der Kalender:
      calCompliant (Pause) beendet den Tag, Wartetage ohne Trade und ohne Zufallszahl, Auszahlung am Ende des Freigabetags
      ohne Trade (kein Handelstag); sonst wird weiter getradet. Gebühren: fee + feeMonthly je weitere angefangene
-     30 Kalendertage der Challenge + feeActivation beim Bestehen. */
+     30 Kalendertage der Challenge + feeActivation beim Bestehen.
+     Slippage: ein Verlust kostet risk + slip + cost, slip = slipPct (bzw. bei 'dist' mit slipTailProb slipTailPct) % von risk.
+     Die Höhe kommt aus der Lage der Zufallszahl im Verlustbereich (u = (r − p)/(1 − p)), keine weitere Zufallszahl.
+     Gewinn-Trades (Take-Profit als Limit) ohne Slippage. Gegentrade: bei Prop-Verlust genau h × risk (keine Slippage zu
+     seinen Gunsten), bei Prop-Gewinn rutscht sein eigener Stop um h × slip (u = r/p). Der regeltreue Trader prüft vor dem
+     Trade mit risk × (1 + slipBuffer/100) + cost; das DLL wird nach jedem Trade auch bei dllCompliant geprüft. */
   function simulate(P, seed){
     const r=mulberry32(seed>>>0), MAXT=500, TPD=P.tradesPerDay||1;
-    const res={accts:[],list:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
+    const res={accts:[],list:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,slipPaid:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
       hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0};
     const cal=calDay;
     const PH=['step1','step2','funded'], sum={}, toPass=[];
-    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0};
+    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0};
     const delays=[], dDelays=[], firstPays=[], firstPayCals=[]; let hitN=0, hitFail=0;
     const LOSS=P.risk+P.cost, hard=P.dllType==='hard';
+    // Slippage (M-017): Vorabprüfung des regeltreuen Traders mit Puffer
+    const LOSSB=P.slipBuffer>0 ? P.risk*(1+P.slipBuffer/100)+P.cost : LOSS, SLIP=P.slipMode!=='none';
+    const slipOf=u=>(P.slipMode==='dist' && u<P.slipTailProb ? P.slipTailPct : P.slipPct)/100*P.risk;
     let real=0, cNo=0, cHe=0;
     for(let i=0;i<P.n;i++){
-      const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false,
+      const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false,slipPaid:0,
         phases:{step1:null,step2:null,funded:null}};
       const detail=i<12;
-      let day=0, evalEnd=0;
+      let day=0, evalEnd=0, lastSlip=0;
       const trade=(hedgeOn,phase)=>{
-        const gross = r()<P.p ? P.risk*P.rr : -P.risk;
-        a.trades++;
-        if(hedgeOn){ const hv=-P.h*gross - P.h*P.cost; if(phase==='e') a.hedgeEval+=hv; else a.hedgeFund+=hv; real+=hv; if(real<res.realMin) res.realMin=real; }
+        const z=r(), win=z<P.p;
+        // Slippage-Höhe aus der Lage von z im Verlust- bzw. Gewinnbereich (dort jeweils gleichverteilt)
+        let slip=0, hslip=0;
+        if(SLIP){ if(!win) slip=slipOf((z-P.p)/(1-P.p)); else if(hedgeOn) hslip=slipOf(z/P.p); }
+        const gross = win ? P.risk*P.rr : -P.risk-slip;
+        a.trades++; a.slipPaid+=slip; lastSlip=slip;
+        // Gegentrade: Take-Profit (Prop-Verlust) als Limit ohne Slippage, eigener Stop (Prop-Gewinn) mit h × Slippage
+        if(hedgeOn){ const hv=win ? -P.h*gross - P.h*hslip - P.h*P.cost : P.h*P.risk - P.h*P.cost; if(phase==='e') a.hedgeEval+=hv; else a.hedgeFund+=hv; real+=hv; if(real<res.realMin) res.realMin=real; }
         return gross-P.cost;
       };
       // Tageszähler einer Phase; ein Tag zählt nur mit mindestens einem Trade
-      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,firstPayDay:null,payDays:[],bestDay:[]}; a.phases[k]=ph; return ph; };
+      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,firstPayDay:null,payDays:[],bestDay:[]}; a.phases[k]=ph; return ph; };
       // DLL vor dem Trade (regeltreu): true = Trade verweigert, Tag endet
-      const refuse=(ph,lim,pnl)=>{ if(lim>0 && P.dllCompliant && pnl-LOSS<=-lim){ ph.dllStops++; return true; } return false; };
-      // DLL nach dem Trade (nicht regeltreu): 0 = weiter, 1 = Tag endet (soft), 2 = Bruch (hard)
+      const refuse=(ph,lim,pnl)=>{ if(lim>0 && P.dllCompliant && pnl-LOSSB<=-lim){ ph.dllStops++; return true; } return false; };
+      // DLL nach dem Trade: 0 = weiter, 1 = Tag endet (soft), 2 = Bruch (hard)
+      // Durch Slippage: ohne die Slippage dieses Trades wäre das Limit nicht erreicht (beim regeltreuen Trader immer)
       const breach=(ph,lim,pnl,slotLeft)=>{
-        if(!(lim>0) || P.dllCompliant || pnl>-lim) return 0;
+        if(!(lim>0) || pnl>-lim) return 0;
+        if(pnl+lastSlip>-lim) ph.dllSlipBreaches++;
+        if(P.dllCompliant){ if(hard){ ph.dllBreaches++; return 2; } return 1; }
         if(hard){ ph.dllStops++; ph.dllBreaches++; return 2; }
         if(slotLeft) ph.dllStops++;
         return 1;
       };
+      // DD-Bruch durch Slippage: ohne die Slippage dieses Trades bliebe eq über dem Floor
+      const ddSlip=(ph,eq,floor)=>{ if(eq+lastSlip>floor) ph.ddSlipBreaches++; };
       // Consistency: true = Bestehen bzw. Auszahlung erlaubt
       const consOk=(pct,best,pnl,gain)=>!(pct>0) || Math.max(best,pnl) < pct/100*gain;
       // Blockade höchstens einmal pro Tag zählen
@@ -165,7 +199,7 @@
                 else if(daysOk(td,wd,pnl,P.evalMinDays,P.evalWinDays,P.evalWinDayMin)){done=true;end=true;break;}
                 else { dblock(ph,st); if(dFirst===null) dFirst=day; dBlocked=true; }
               }
-              const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){end=true;break;}
+              const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){ddSlip(ph,eq,floor);end=true;break;}
               const b=breach(ph,P.dllEval,pnl,k+1<TPD && t<MAXT); if(b===2){end=true;break;} if(b===1) break;
               // Regeltreu: Ziel erreicht, Regel blockiert → Tag endet
               if(blocked && P.consCompliant) break;
@@ -214,7 +248,7 @@
             const protect = P.mode==='instant' && a.nPay===0;
             const x=trade(P.h>0 && (P.hfund||protect), protect?'e':'f'); t++; pnl+=x;
             eq+=x; if(eq>peak) peak=eq;
-            const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){a.blown=true;break;}
+            const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){ddSlip(ph,eq,floor);a.blown=true;break;}
             const b=breach(ph,lim,pnl,k+1<TPD && t<MAXT); if(b===2){a.blown=true;break;} if(b===1) break;
             // Auszahlung beendet den Tag (kein Phasenwechsel)
             // Zyklus: ctd/cwd = abgeschlossene Handels- bzw. Gewinntage seit der letzten Auszahlung
@@ -240,7 +274,7 @@
           if(eq>peakEod) peakEod=eq;
         }
       }
-      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].consBlocks+=ph.consBlocks; sum[k].daysBlocks+=ph.daysBlocks; sum[k].calBlocks+=ph.calBlocks; } }
+      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].dllSlipBreaches+=ph.dllSlipBreaches; sum[k].ddSlipBreaches+=ph.ddSlipBreaches; sum[k].consBlocks+=ph.consBlocks; sum[k].daysBlocks+=ph.daysBlocks; sum[k].calBlocks+=ph.calBlocks; } }
       if(P.mode==='challenge' && a.passed) toPass.push(a.phases.step1.days+(a.phases.step2?a.phases.step2.days:0));
       const fpd=a.phases.funded?a.phases.funded.firstPayDay:null;
       if(fpd!==null){ firstPays.push(fpd); firstPayCals.push(cal(fpd)); }
@@ -252,7 +286,7 @@
       if(success){res.hSucc+=a.hedgeEval;res.nSucc++;} else {res.hFail+=a.hedgeEval;res.nFail++;}
       res.hAfter+=a.hedgeFund;
       a.netNo=a.pay-a.feesPaid; a.netHe=a.netNo+a.hedge;
-      res.fees+=a.feesPaid; res.pay+=a.pay; res.hedge+=a.hedge; res.nPayTot+=a.nPay;
+      res.fees+=a.feesPaid; res.pay+=a.pay; res.slipPaid+=a.slipPaid; res.hedge+=a.hedge; res.nPayTot+=a.nPay;
       if(a.passed) res.passed++;
       if(!a.passed) res.fail++; else if(a.nPay===0) res.passNo++; else res.paid++;
       cNo+=a.netNo; cHe+=a.netHe;
@@ -261,14 +295,16 @@
       // Kompakte Zeile je Account (alle n): Ergebnis 'fail' (Challenge verloren), 'pass' (ohne Auszahlung), 'paid' (≥ 1 Auszahlung)
       // daysToFirstPay: Tagesnummer der 1. Auszahlung ab Account-Start (inkl. Challenge), ohne Auszahlung null
       // calDays: Kalendertag des letzten Account-Tags, calToFirstPay: Kalendertag der 1. Auszahlung (ohne null), feesPaid: alle Gebühren
+      // slipPaid: Summe der Slippage in $ auf dem Prop-Konto
       res.list.push({i,res:!a.passed?'fail':a.nPay>0?'paid':'pass',trades:a.trades,days:day,daysToFirstPay:fpd,nPay:a.nPay,pay:a.pay,hedge:a.hedge,netNo:a.netNo,netHe:a.netHe,
-        calDays:a.calDays,calToFirstPay:fpd===null?null:cal(fpd),feesPaid:a.feesPaid});
+        calDays:a.calDays,calToFirstPay:fpd===null?null:cal(fpd),feesPaid:a.feesPaid,slipPaid:a.slipPaid});
     }
     res.real=real; res.netNo=cNo; res.netHe=cHe;
     // Mittelwerte je Phase nur über Accounts, die die Phase erreicht haben (sonst null)
     res.days={};
     for(const k of PH){ const s=sum[k]; res.days[k]={n:s.n,tradingDays:s.n?s.tradingDays/s.n:null,winDays:s.n?s.winDays/s.n:null,
-      dllStops:s.n?s.dllStops/s.n:null,dllBreaches:s.n?s.dllBreaches/s.n:null,consBlocks:s.n?s.consBlocks/s.n:null,daysBlocks:s.n?s.daysBlocks/s.n:null,
+      dllStops:s.n?s.dllStops/s.n:null,dllBreaches:s.n?s.dllBreaches/s.n:null,
+      dllSlipBreaches:s.n?s.dllSlipBreaches/s.n:null,ddSlipBreaches:s.n?s.ddSlipBreaches/s.n:null,consBlocks:s.n?s.consBlocks/s.n:null,daysBlocks:s.n?s.daysBlocks/s.n:null,
       calBlocks:s.n?s.calBlocks/s.n:null}; }
     res.medianDaysToPass=median(toPass);
     // Consistency: Zusatztage vom ersten Blockade-Tag bis zum Bestehen (Step 1 + Step 2), Mittel über bestandene Accounts
