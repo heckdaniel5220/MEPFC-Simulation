@@ -314,7 +314,7 @@ test('Blue Guardian CFD: DLL hart, split × 0,97, maxRisk = Guardian Shield, buf
   assert.strictEqual(by('bg-cfd-instant-100').consFunded, 20);
   assert.strictEqual(by('bg-cfd-instant-300').consFunded, 15);
   assert.strictEqual(by('bg-cfd-instant-200').cap, 10000);
-  assert.strictEqual(by('bg-cfd-instant-100').minp, 2500);
+  assert.strictEqual(by('bg-cfd-instant-100').minp, 100); // M-004: Gewinntage im Kern, minp = Mindestauszahlung
   assert.strictEqual(by('bg-cfd-1step-nano-100').consEval, 50);
   assert.strictEqual(by('bg-cfd-2step-nano-100').cap, 2000);
   assert.strictEqual(by('bg-cfd-2step-nano-100').consEval, 0);
@@ -329,7 +329,7 @@ test('Blue Guardian Futures: DLL soft, Consistency, buf, minp, cap je Plan', () 
     assert.ok(!o.ddStatic, o.id + ' ddStatic');
     if (o.id.startsWith('bg-fut-std-')) { assert.strictEqual(o.buf, o.dd + 100, o.id); assert.strictEqual(o.cap, r.payoutCap1, o.id); assert.strictEqual(o.consFunded, 40, o.id); }
     if (o.id.startsWith('bg-fut-express-')) { assert.strictEqual(o.buf, r.buffer, o.id); assert.strictEqual(o.cap, r.dailyPayoutMax, o.id); assert.strictEqual(o.dd, r.mllFunded, o.id); assert.strictEqual(o.consEval, 40, o.id); }
-    if (o.id.startsWith('bg-fut-reserve-')) { assert.strictEqual(o.buf, 100, o.id); assert.strictEqual(o.minp, Math.max(100, 5 * r.winDayMin), o.id); assert.strictEqual(o.consEval, 40, o.id); }
+    if (o.id.startsWith('bg-fut-reserve-')) { assert.strictEqual(o.buf, 100, o.id); assert.strictEqual(o.minp, 100, o.id); assert.strictEqual(o.consEval, 40, o.id); }
     if (o.id.startsWith('bg-fut-direct-')) { assert.strictEqual(o.mode, 'instant', o.id); assert.strictEqual(o.target, 0, o.id); assert.strictEqual(o.minp, r.cycleTarget1, o.id); assert.strictEqual(o.consFunded, 20, o.id); }
     else assert.strictEqual(o.mode, 'challenge', o.id);
   }
@@ -801,6 +801,154 @@ test('M-014 Zählung: verloren + mit Auszahlung + sonstige = n, passend zu fail/
     assert.strictEqual(R.fail + R.paid + R.passNo, n, k);
     assert.strictEqual(R.cumNo.length, n + 1, k);
   }
+});
+
+// ---- Gewinntage und Mindesttage (M-004) ----
+const DAYS_ZERO = { evalMinDays: 0, evalWinDays: 0, evalWinDayMin: 0, payMinDays: 0, payWinDays: 0, payWinDayMin: 0, daysCompliant: true };
+const DAYS_KEYS = Object.keys(DAYS_ZERO);
+// Ergebnis ohne die neuen Tage-Felder (daysBlocks, firstPayDay, daysToFirstPay)
+const noDays = R => JSON.stringify({ ...R,
+  days: Object.fromEntries(Object.entries(R.days).map(([k, d]) => [k, { ...d, daysBlocks: 0, daysToFirstPay: 0 }])),
+  accts: R.accts.map(a => ({ ...a, phases: Object.fromEntries(Object.entries(a.phases).map(([k, ph]) => [k, ph && { ...ph, daysBlocks: 0 }])) })) });
+
+test('M-004 Golden: ohne Regel exakt die Baseline (alle 5 Presets, tradesPerDay 1 und 3)', () => {
+  for (const k of Object.keys(PRESETS)) for (const tpd of [1, 3]) {
+    const R = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd }), SEED);
+    const Z = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...DAYS_ZERO }), SEED);
+    const F = simulate(prepare({ ...PRESETS[k], n: 2000, tradesPerDay: tpd, ...DAYS_ZERO, daysCompliant: false }), SEED);
+    if (GOLD[k]) assert.deepStrictEqual(kpi(R, 2000), GOLD[k], k + ' tpd ' + tpd);
+    assert.strictEqual(JSON.stringify(Z), JSON.stringify(R), k + ' explizit 0 = Default');
+    assert.strictEqual(noDays(F), noDays(R), k + ' Schalter ohne Regel wirkungslos');
+    for (const ph of ['step1', 'step2', 'funded']) if (R.days[ph].n) assert.strictEqual(R.days[ph].daysBlocks, 0, k + ' ' + ph);
+    if (PRESETS[k].mode === 'challenge') assert.strictEqual(R.daysPassDelay, 0, k); else assert.strictEqual(R.daysPassDelay, null, k);
+    // Tag der 1. Auszahlung: Mittel über Accounts mit Auszahlung, aus den Detail-Accounts nachvollziehbar
+    if (R.paid) assert.ok(R.days.funded.daysToFirstPay >= 1, k); else assert.strictEqual(R.days.funded.daysToFirstPay, null, k);
+    for (const a of R.accts) if (a.phases.funded) assert.strictEqual(a.phases.funded.firstPayDay !== null, a.nPay > 0, k);
+  }
+});
+
+test('M-004 Eval Mindesttage: Ziel an Tag 1, evalMinDays 3 → Bestehen frühestens an Tag 3', () => {
+  // je Trade +190, 10 Trades pro Tag: Ziel 1.000 nach 6 Trades an Tag 1
+  const b = simulate(det({ tradesPerDay: 10 }), 1).accts[0].phases.step1;
+  assert.deepStrictEqual([b.days, b.dayPnl], [1, [1140]]);
+  const R = simulate(det({ tradesPerDay: 10, evalMinDays: 3 }), 1), ph = R.accts[0].phases.step1;
+  assert.strictEqual(R.passed, 20);
+  assert.deepStrictEqual(ph.dayPnl, [1140, 190, 190], 'regeltreu: Tag endet, sobald der laufende Tag zählt');
+  assert.deepStrictEqual([ph.days, ph.daysBlocks, ph.consBlocks], [3, 2, 0]);
+  assert.deepStrictEqual([R.days.step1.daysBlocks, R.daysPassDelay, R.medianDaysToPass], [2, 2, 3]);
+  // daysCompliant = false: volle Tage weiter, Bestehen an Tag 3 mit dem 1. Trade
+  const F = simulate(det({ tradesPerDay: 10, evalMinDays: 3, daysCompliant: false }), 1).accts[0].phases.step1;
+  assert.deepStrictEqual([F.dayPnl, F.daysBlocks], [[1900, 1900, 190], 2]);
+  // 2-Step: je Step getrennt
+  const T = simulate(det({ tradesPerDay: 10, evalMinDays: 3, target2: 1000 }), 1).accts[0];
+  assert.deepStrictEqual([T.phases.step1.days, T.phases.step2.days, T.phases.step2.firstDay], [3, 3, 4]);
+});
+
+test('M-004 Eval Gewinntage: Bestehen erst mit n Tagen ≥ X, der laufende Tag zählt mit', () => {
+  // evalWinDays 3, Schwelle 500: Tag 1 Ziel + Gewinntag, Tag 2 und 3 je 3 Trades bis 570 ≥ 500
+  const R = simulate(det({ tradesPerDay: 10, evalWinDays: 3, evalWinDayMin: 500 }), 1), ph = R.accts[0].phases.step1;
+  assert.strictEqual(R.passed, 20);
+  assert.deepStrictEqual(ph.dayPnl, [1140, 570, 570]);
+  // Tag 3 zählt als Blockade, bis der 3. Trade die Schwelle erreicht
+  assert.deepStrictEqual([ph.winDays, ph.daysBlocks, R.daysPassDelay], [3, 3, 2]);
+  // Schwelle 0 = Tages-P&L > 0: ein Gewinn-Trade pro Tag reicht
+  const Z = simulate(det({ tradesPerDay: 10, evalWinDays: 3 }), 1).accts[0].phases.step1;
+  assert.deepStrictEqual(Z.dayPnl, [1140, 190, 190]);
+  // Verlusttage zählen nicht: wr 50 %, alle Accounts mit Bestehen haben ≥ 3 Tage mit ≥ 500 $
+  const P = prepare({ ...PRESETS.futures, tradesPerDay: 3, evalWinDays: 3, evalWinDayMin: 500, n: 300 });
+  for (const a of simulate(P, SEED).accts) if (a.passed) assert.ok(a.phases.step1.dayPnl.filter(v => v >= 500).length >= 3);
+});
+
+// Instant: Puffer 0, Schwelle 300; je Trade +190, 3 Trades pro Tag, max. 2 Auszahlungen
+const fundD = over => simulate(det({ mode: 'instant', target: 0, buf: 0, minp: 300, maxp: 2, tradesPerDay: 3, ...over }), 1);
+
+test('M-004 Funded Gewinntage je Zyklus: Auszahlung blockiert bis n Tage ≥ X, danach Reset', () => {
+  const b = fundD({}).accts[0].phases.funded;
+  assert.deepStrictEqual([b.dayPnl, b.firstPayDay], [[380, 380], 1]);
+  const R = fundD({ payWinDays: 2, payWinDayMin: 500 }), a = R.accts[0], f = a.phases.funded;
+  assert.deepStrictEqual(f.dayPnl, [570, 570, 570, 570], 'Zyklus 1: Tag 1–2, Zyklus 2: Tag 3–4');
+  assert.deepStrictEqual([a.nPay, f.firstPayDay, f.daysBlocks], [2, 2, 4]);
+  assert.ok(Math.abs(a.pay - 2 * 1140 * 0.9) < 1e-9);
+  assert.strictEqual(R.days.funded.daysToFirstPay, 2);
+});
+
+test('M-004 Funded Mindesttage je Zyklus', () => {
+  const R = fundD({ payMinDays: 2 }), a = R.accts[0], f = a.phases.funded;
+  assert.deepStrictEqual(f.dayPnl, [380, 190, 380, 190]);
+  assert.deepStrictEqual([a.nPay, f.firstPayDay, f.daysBlocks], [2, 2, 2]);
+  assert.ok(Math.abs(a.pay - 2 * 570 * 0.9) < 1e-9);
+  // daysCompliant = false: am Blockade-Tag weiter
+  const F = fundD({ payMinDays: 2, daysCompliant: false }).accts[0].phases.funded;
+  assert.deepStrictEqual(F.dayPnl, [570, 190, 570, 190]);
+});
+
+test('M-004 Zusammenspiel: Consistency und Tage müssen beide erfüllt sein', () => {
+  // M-003 allein: Bestehen an Tag 4 ([570, 570, 190, 190]); mit 5 Mindesttagen erst an Tag 5
+  const R = simulate(det({ tradesPerDay: 3, consEval: 40, evalMinDays: 5 }), 1), ph = R.accts[0].phases.step1;
+  assert.deepStrictEqual(ph.dayPnl, [570, 570, 190, 190, 190]);
+  assert.deepStrictEqual([ph.consBlocks, ph.daysBlocks, R.consPassDelay, R.daysPassDelay], [2, 1, 3, 1]);
+  // Funded: Consistency 40 % allein → 1. Auszahlung an Tag 5, 7 Mindesttage allein → Tag 7, beide → Tag 7
+  const c = fundD({ consFunded: 40 }).accts[0].phases.funded, d = fundD({ payMinDays: 7 }).accts[0].phases.funded;
+  const f = fundD({ consFunded: 40, payMinDays: 7 }).accts[0].phases.funded;
+  assert.deepStrictEqual([c.firstPayDay, d.firstPayDay, f.firstPayDay], [5, 7, 7]);
+  assert.deepStrictEqual([c.daysBlocks, d.consBlocks], [0, 0]);
+  // daysBlocks nur an Tagen, an denen die Consistency erfüllt war (Tag 5–6 und 12–13)
+  assert.deepStrictEqual([f.consBlocks, f.daysBlocks, f.days], [8, 4, 14]);
+});
+
+test('M-004 Validierung: negative, nicht-ganzzahlige oder unerreichbare Werte werfen', () => {
+  for (const k of ['evalMinDays', 'evalWinDays', 'payMinDays', 'payWinDays'])
+    for (const v of [-1, 1.5, '3', NaN, null]) assert.throws(() => det({ [k]: v }), new RegExp(k), k + ' ' + v);
+  for (const k of ['evalWinDayMin', 'payWinDayMin'])
+    for (const v of [-5, '100', NaN, Infinity]) assert.throws(() => det({ [k]: v }), new RegExp(k), k + ' ' + v);
+  assert.throws(() => det({ daysCompliant: 'ja' }), /daysCompliant/);
+  // höchster Tagesgewinn 3 × 190 = 570
+  assert.throws(() => det({ tradesPerDay: 3, evalWinDays: 1, evalWinDayMin: 600 }), /evalWinDayMin/);
+  assert.throws(() => det({ tradesPerDay: 3, payWinDays: 1, payWinDayMin: 600 }), /payWinDayMin/);
+  assert.doesNotThrow(() => det({ tradesPerDay: 3, evalWinDays: 1, evalWinDayMin: 570 }));
+  assert.doesNotThrow(() => det({ tradesPerDay: 3, payWinDays: 0, payWinDayMin: 600 }), 'ohne Tage keine Prüfung');
+  assert.doesNotThrow(() => det({ mode: 'instant', target: 0, tradesPerDay: 3, evalWinDays: 1, evalWinDayMin: 600 }), 'Instant ohne Eval');
+});
+
+test('M-004 Daten: Tage-Regeln aus rules, Prozent-Schwellen in $, minp = echte Mindestauszahlung', () => {
+  const v = id => { const o = byId(id); return DAYS_KEYS.slice(0, 6).map(k => o[k]); };
+  // evalMinDays, evalWinDays, evalWinDayMin, payMinDays, payWinDays, payWinDayMin
+  assert.deepStrictEqual(v('af-zero-50'), [0, 0, 0, 0, 5, 200]);
+  assert.deepStrictEqual(v('af-direct-50'), [0, 0, 0, 0, 0, 0]);
+  assert.deepStrictEqual(v('lu-flex-150'), [0, 0, 0, 0, 5, 250]);
+  assert.deepStrictEqual(v('lu-direct-50'), [0, 0, 0, 5, 0, 0]);
+  assert.deepStrictEqual(v('mf-rapid-25'), [2, 0, 0, 0, 0, 0]);
+  assert.deepStrictEqual(v('mf-builder-50'), [1, 0, 0, 2, 0, 0]);
+  assert.deepStrictEqual(v('fn-flex-150'), [0, 0, 0, 0, 5, 250]);
+  assert.deepStrictEqual(v('ac-d-50'), [0, 0, 0, 0, 7, 0]);
+  assert.deepStrictEqual(v('ac-one-50'), [1, 0, 0, 0, 0, 0]);
+  assert.deepStrictEqual(v('ac-pro6-50'), [3, 0, 0, 0, 0, 0]);
+  assert.deepStrictEqual(v('bg-cfd-instant-100'), [0, 0, 0, 0, 5, 500]);
+  assert.deepStrictEqual(v('bg-cfd-1step-25'), [0, 3, 125, 0, 0, 0]);
+  assert.deepStrictEqual(v('bg-cfd-2step-200'), [0, 3, 1000, 0, 0, 0]);
+  assert.deepStrictEqual(v('bg-cfd-1step-nano-50'), [0, 0, 0, 0, 5, 250]);
+  assert.deepStrictEqual(v('bg-cfd-2step-nano-50'), [0, 0, 0, 0, 0, 0]);
+  assert.deepStrictEqual(v('bg-fut-reserve-150'), [0, 0, 0, 0, 5, 250]);
+  let ev = 0, fu = 0;
+  for (const o of ALL) {
+    const r = o.rules || {}, inst = o.mode === 'instant';
+    if (o.evalMinDays || o.evalWinDays) ev++;
+    if (o.payMinDays || o.payWinDays) fu++;
+    for (const k of DAYS_KEYS.slice(0, 6)) assert.ok(Number.isFinite(o[k]) && o[k] >= 0, o.id + ' ' + k);
+    if (inst) assert.deepStrictEqual([o.evalMinDays, o.evalWinDays, o.evalWinDayMin], [0, 0, 0], o.id);
+    // Prozent-Schwellen: Größe × Prozent
+    if (r.minProfitDaysEval) assert.strictEqual(o.evalWinDayMin, r.size * r.minProfitDayPct / 100, o.id);
+    if (r.minProfitDays && r.minProfitDayPct) assert.strictEqual(o.payWinDayMin, r.size * r.minProfitDayPct / 100, o.id);
+    // Gewinntage stehen nicht mehr in minp: minp = Mindestauszahlung (÷ Auszahlungsanteil) bzw. Zyklusziel
+    if (o.payWinDays && r.payoutMin) assert.strictEqual(o.minp, Math.max(r.payoutMin / (r.payoutFrac || 1), r.cycleProfitMin || 0, r.cycleTarget1 || 0), o.id);
+    assert.ok(!('minDaysEval' in r) || !o.id.startsWith('bg-'), o.id + ' BG: minProfitDaysEval statt minDaysEval');
+    assert.doesNotThrow(() => offerP(o, DAYS_KEYS.reduce((x, k) => ({ ...x, [k]: o[k] ?? DAYS_ZERO[k] }), { tradesPerDay: 1 })), o.id);
+  }
+  assert.deepStrictEqual([ev, fu], [35, 49]);
+  const minp = id => byId(id).minp;
+  assert.deepStrictEqual(['af-zero-50', 'af-std-50', 'af-adv-50', 'lu-flex-150', 'fn-flex-50', 'bg-cfd-instant-400', 'bg-cfd-1step-nano-200', 'bg-fut-reserve-50'].map(minp),
+    [400, 1000, 2000, 1000, 500, 100, 100, 100]);
+  for (const p of Object.values(PRESETS)) for (const k of DAYS_KEYS) assert.ok(!(k in p));
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
