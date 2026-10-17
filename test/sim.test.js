@@ -1487,4 +1487,72 @@ test('M-019 Angebote: BG CFD und Alpha Capital mit Shield aus vorhandenen rules-
   assert.strictEqual(ALL.filter(o => o.shield > 0).length, 49);
 });
 
+// ---- M-021: Detail für jeden Account (opt {from, skip, detail}, accountDetail) ----
+const { accountDetail } = require('../js/sim.js');
+const { autoParams } = require('../js/params.js');
+const J = x => JSON.stringify(x);
+// Strategien mit Slippage, 3 Trades je Tag, Gegentrade im Funded und ohne Regeltreue (mehr Wege durch den Kern)
+const M21_UI = [
+  { wr: 46, rr: 1.5, tradesPerDay: 1 },
+  { wr: 52, rr: 1.2, tradesPerDay: 3, slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, slipBuffer: 10,
+    hfund: true, dllCompliant: false, consCompliant: false, daysCompliant: false }
+];
+const m21P = (o, ui, n) => { const P0 = autoParams(o, { ...ui, n }); return P0.notTradable ? null : prepare(P0); };
+
+test('M-021 ohne opt bzw. mit leerem opt bit-gleich, detail ändert nur R.accts', () => {
+  for (const ui of M21_UI) for (const id of ['af-std-50', 'bg-cfd-instant-50', 'ac-d-50', 'lu-direct-50', 'mf-builder-50']) {
+    const P = m21P(ALL.find(o => o.id === id), ui, 300); if (!P) continue;
+    const a = simulate(P, SEED), b = simulate(P, SEED, {}), c = simulate(P, SEED, { detail: [5, 40, 299] });
+    assert.strictEqual(J(a), J(b), id);
+    assert.strictEqual(J({ ...c, accts: c.accts.slice(0, 12) }), J(a), id);
+    assert.strictEqual(c.accts.length, 14, id);
+  }
+  for (const k of Object.keys(PRESETS)) { const P = prepare(PRESETS[k]); assert.strictEqual(J(simulate(P, SEED, {})), J(simulate(P, SEED)), k); }
+});
+
+test('M-021 accountDetail: jeder Account aller Angebote gleich R.list[i], i < 12 gleich R.accts[i], ohne Rückfall', () => {
+  let n = 0;
+  for (const ui of M21_UI) for (const o of ALL) {
+    const P = m21P(o, ui, 60); if (!P) continue;
+    const R = simulate(P, 7);
+    for (let i = 0; i < P.n; i++) {
+      const d = accountDetail(P, 7, R.list, i); n++;
+      assert.strictEqual(d.fallback, false, o.id + ' #' + i);
+      if (i < 12) assert.strictEqual(J(d.acct), J(R.accts[i]), o.id + ' #' + i);
+    }
+  }
+  // Video-Szenarien (Gegentrade in der Challenge)
+  for (const k of Object.keys(PRESETS)) {
+    const P = prepare(PRESETS[k]), R = simulate(P, SEED);
+    for (let i = 0; i < P.n; i += 37) { const d = accountDetail(P, SEED, R.list, i); n++; assert.strictEqual(d.fallback, false, k + ' #' + i); if (i < 12) assert.strictEqual(J(d.acct), J(R.accts[i]), k); }
+  }
+  assert.ok(n > 10000, 'zu wenige Accounts geprüft: ' + n);
+});
+
+test('M-021 Weg A (detail) und Weg B (from/skip) liefern dasselbe Detail für Accounts ab 12', () => {
+  for (const ui of M21_UI) for (const id of ['af-std-50', 'bg-cfd-2step-100', 'ac-one-50', 'fn-flex-50']) {
+    const P = m21P(ALL.find(o => o.id === id), ui, 500); if (!P) continue;
+    const R = simulate(P, SEED);
+    for (const i of [12, 250, 499]) {
+      const A = simulate(P, SEED, { detail: [i] }), B = accountDetail(P, SEED, R.list, i);
+      assert.strictEqual(J(B.acct), J(A.accts[12]), id + ' #' + i);
+    }
+  }
+});
+
+test('M-021 accountDetail: verfälschte Liste löst den Rückfall aus und liefert trotzdem das richtige Detail', () => {
+  const P = m21P(ALL.find(o => o.id === 'af-std-50'), M21_UI[0], 200), R = simulate(P, SEED);
+  const ok = accountDetail(P, SEED, R.list, 150);
+  const bad = R.list.map(x => ({ ...x })); bad[3].trades += 1;
+  const d = accountDetail(P, SEED, bad, 150);
+  assert.strictEqual(d.fallback, true);
+  assert.strictEqual(J(d.acct), J(ok.acct));
+  const d5 = accountDetail(P, SEED, bad, 5);
+  assert.strictEqual(d5.fallback, true); assert.strictEqual(J(d5.acct), J(R.accts[5]));
+  assert.deepStrictEqual(accountDetail(P, SEED, bad, 150, true), { acct: null, fallback: true });
+  assert.strictEqual(J(accountDetail(P, SEED, R.list, 150, true).acct), J(ok.acct));
+  assert.throws(() => accountDetail(P, SEED, R.list, 200), /Index/);
+  assert.throws(() => accountDetail(P, SEED, R.list, -1), /Index/);
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

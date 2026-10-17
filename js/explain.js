@@ -136,6 +136,9 @@
       {label:'Live ab Tagesgewinn (nicht im Modell)',raw:['liveAtDailyProfit'],unit:'$'}]},
     {key:'risiko',label:'Risiko',items:[
       {label:'Max. Risiko je Trade (maxRisk)',core:'maxRisk',raw:['maxRiskPct','guardianShieldPct'],unit:'$'},
+      {label:'Grenze Guardian Shield / Max Risk im Kern (nur Funded)',core:'shield',raw:[],unit:'$',pct:true,activeIf:o=>o.shield>0},
+      {label:'Split ab dem 1. Bruch',core:'shieldSplit',raw:[],unit:'%',activeIf:o=>o.shield>0 && o.shieldStrikes>1},
+      {label:'Brüche bis Account verloren',core:'shieldStrikes',raw:[],unit:'Anzahl',activeIf:o=>o.shield>0},
       {label:'Guardian Shield Nano laut Quelle',raw:['guardianShieldNano'],unit:'Text'},
       {label:'Max. Mini / Micro (nicht im Modell)',raw:['maxMini','maxMicro'],unit:'Kontrakte',multi:true},
       {label:'Lot-Limit (nicht im Modell)',raw:['lotLimit'],unit:'Lots'},
@@ -274,6 +277,11 @@
     const L=[]; if(P.payFirstAfterCal>0) L.push(`1. Auszahlung frühestens nach ${P.payFirstAfterCal} Kalendertagen`); if(P.payEveryCal>0) L.push(`danach alle ${P.payEveryCal}`);
     return `Kalender (${L.join(', ')})`;
   }
+  // Guardian Shield (Blue Guardian) bzw. Max Risk (Alpha Capital): Name wie in params.js
+  const shieldName=P=>P.rules && P.rules.guardianShieldPct>0?'Guardian Shield':'Max Risk';
+  function shieldLabel(P){
+    return `${shieldName(P)} (${moneyData(P.shield)} je Trade, nur Funded, ${P.shieldStrikes>1?`1. Bruch Split ${dataNum(P.shieldSplit)} %, ${P.shieldStrikes}. Bruch Account verloren`:'1. Bruch Account verloren'})`;
+  }
   const capLabel=(P,o)=>{ const m=proxyCap(o); return m?`Cap ${moneyData(P.cap)} (${proxyText(m)})`:`Cap ${moneyData(P.cap)} je Auszahlung`; };
 
   // Regelgruppen: aktiv, Abschaltfelder, Etikett. Monatsabo ohne zweiten Lauf (exakt aus feesPaid).
@@ -284,9 +292,12 @@
     {key:'days',label:'Tage-Regeln',on:P=>(chal(P) && (P.evalMinDays>0||P.evalWinDays>0))||P.payMinDays>0||P.payWinDays>0,
       off:{evalMinDays:0,evalWinDays:0,evalWinDayMin:0,payMinDays:0,payWinDays:0,payWinDayMin:0},rule:daysLabel},
     {key:'cal',label:'Kalender',on:P=>P.payFirstAfterCal>0||P.payEveryCal>0,off:{payFirstAfterCal:0,payEveryCal:0},rule:calLabel},
+    {key:'shield',label:'Guardian Shield / Max Risk',on:P=>P.shield>0,off:{shield:0},rule:shieldLabel,
+      extra:'Risiko wie im Grundlauf (der Risikodeckel wird nicht mitgemessen).'},
     {key:'cap',label:'Cap',on:P=>typeof P.cap==='number' && P.cap<NO_CAP,off:{cap:NO_CAP},rule:capLabel},
     {key:'fee',label:'Monatsabo',on:P=>chal(P) && P.feeMonthly>0,exact:true,rule:P=>`Monatsabo (${moneyData(P.feeMonthly)} je weitere 30 Kalendertage)`}
   ];
+  const SHIELD_SAME='Wirkt nicht: dieselben Accounts hätte der Tages-DD beendet.';
   const STATE={same:'wirkt nicht (identisch)',none:'bindet nicht messbar',binds:'bindet'};
 
   function stripUi(ui){ const own={}; for(const k in (ui||{})) if(!RANK_KEYS.includes(k)) own[k]=ui[k]; return own; }
@@ -354,8 +365,16 @@
         c={d,lo:d,hi:d,half:0,state:d!==0?'binds':'same',stateText:STATE[d!==0?'binds':'same'],moneyIdentical:d===0,exact:true,
           dPay:0,payLo:0,payHi:0,payBinds:false,dDays:0,dCalDays:0};
       } else {
-        const a=run(offer,Object.assign({},P,G.off),seed,deps); yield;
+        // Shield (M-021): kann kein Verlust die Grenze erreichen, wäre der Lauf ohne Grenze bit-gleich → ohne zweiten Lauf identisch
+        const skip=G.key==='shield' && !shieldCanBreak(P);
+        let a=b;
+        if(!skip){ a=run(offer,Object.assign({},P,G.off),seed,deps); yield; }
         c=compare(b,a,ci95); c.off=G.off;
+        // Shield (M-021): Accounts, die der Shield im Grundlauf beendet; identisch trotzdem → dieselben Accounts beendet der Tages-DD
+        if(G.key==='shield'){
+          c.shieldLost=b.list.filter(x=>x.shieldLost).length;
+          c.note=c.state==='same' && c.shieldLost>0?SHIELD_SAME:null;
+        }
         // Negatives Δ und maxp nur Konvention: Kontrolllauf mit und ohne Regel, beide mit maxp 1000
         if(c.state==='binds' && c.d<0 && conv){
           if(!bCtl){ bCtl=run(offer,Object.assign({},P,{maxp:CONTROL_MAXP}),seed,deps); yield; }
@@ -425,6 +444,40 @@
   function slipMean(P){
     const m=P.slipMode, b=m==='fixed'?P.slipPct:m==='dist'?(1-P.slipTailProb)*P.slipPct+P.slipTailProb*P.slipTailPct:0;
     return b>0?b/100*P.risk:0;
+  }
+  /* Guardian Shield / Max Risk gegen Slippage (M-021): Abstand m = shield − risk − cost; ein Funded-Verlust bricht, wenn seine
+     Slippage ≥ m ist. share = Anteil der Funded-Verluste, die brechen (fest 0 oder 1; Ausreißer (1 − q) für die normale, q für die
+     Ausreißer-Slippage), need = kleinster Puffer in % des Risikos, der das verhindert (größte brechende Slippage, weil autoParams das
+     Risiko dann unter risk × (1 + Puffer) + cost < shield deckelt), tail = nur Ausreißer brechen. Ohne Shield oder Slippage share 0. */
+  function shieldExposure(P){
+    const name=P.shield>0?shieldName(P):null, none={share:0,need:0,name,tail:false};
+    if(!(P.shield>0) || !P.slipMode || P.slipMode==='none') return none;
+    const m=P.shield-P.risk-P.cost, hit=pct=>pct>0 && pct/100*P.risk>=m;
+    if(P.slipMode==='fixed') return hit(P.slipPct)?{share:1,need:P.slipPct,name,tail:false}:none;
+    const q=P.slipTailProb, b=hit(P.slipPct), t=hit(P.slipTailPct);
+    const share=(b?1-q:0)+(t?q:0);
+    if(!(share>0)) return none;
+    return {share,need:Math.max(b?P.slipPct:0,t?P.slipTailPct:0),name,tail:!b};
+  }
+  // Kann ein Funded-Verlust (risk + Slippage + cost) die Grenze erreichen? Ohne Slippage nur, wenn risk + cost schon ≥ shield.
+  const shieldCanBreak=P=>P.shield>0 && (P.risk+P.cost>=P.shield || shieldExposure(P).share>0);
+  // Hinweis im Slippage-Bereich (M-021): null, wenn kein Funded-Verlust den Shield bricht
+  function shieldWarnText(P){
+    const e=shieldExposure(P); if(!(e.share>0)) return null;
+    const lim=`${e.name} (${moneyData(P.shield)})`;
+    if(e.tail) return `Ausreißer über dem Puffer: ${num(e.share*100,e.share*100<1?1:0)} % der Verluste im Funded brechen den ${lim}. Puffer auf mindestens ${dataNum(e.need)} % erhöhen oder Ausreißer senken.`;
+    const slip=P.slipPct/100*P.risk;
+    return `Slippage über dem Puffer: jeder volle Stop im Funded bricht den ${lim}; Verlust ${moneyData(P.risk)} + ${moneyData(Math.round(slip*100)/100)} + ${moneyData(P.cost)} = ${moneyData(Math.round((P.risk+slip+P.cost)*100)/100)}. Puffer auf mindestens ${dataNum(e.need)} % erhöhen.`;
+  }
+  /* Zusatz für den Risiko-Hinweis der Rangliste (M-021), nur aus der Strategie: Slippage (fest slipPct, mit Ausreißern
+     max(slipPct, slipTailPct)) über dem Puffer. cnt = {hit, n} nach dem Ranglistenlauf (Zeilen mit Shield, davon betroffen), sonst null. */
+  function shieldRankText(st,cnt){
+    if(!st || !st.slipMode || st.slipMode==='none') return null;
+    const max=st.slipMode==='dist' && st.slipTailProb>0?Math.max(st.slipPct||0,st.slipTailPct||0):(st.slipPct||0);
+    if(!(max>(st.slipBuffer||0))) return null;
+    let t=`Bei Angeboten mit Guardian Shield / Max Risk (Blue Guardian CFD, Alpha Capital), deren Risiko an der Grenze gedeckelt ist, kann ein Verlust mit Slippage die Grenze brechen. Puffer ≥ ${dataNum(max)} % verhindert das.`;
+    if(cnt && cnt.n>0) t+=` Betroffen: ${num(cnt.hit)} von ${num(cnt.n)} Angeboten mit Grenze.`;
+    return t;
   }
   function tradeEV(P){ const p=P.wr/100; return p*P.risk*P.rr-(1-p)*(P.risk+slipMean(P))-P.cost; }
   function s2(row){
@@ -604,7 +657,7 @@
     return {n:R.length,medianPer1k:all,types,disclaimer:DISCLAIMER};
   }
 
-  const api={ruleSheet,challengeType,ruleCosts,ruleCostsSteps,ruleCostsForRows,slipMean,strategyFit,typeSummary,
+  const api={ruleSheet,challengeType,ruleCosts,ruleCostsSteps,ruleCostsForRows,slipMean,shieldExposure,shieldCanBreak,shieldWarnText,shieldRankText,SHIELD_SAME,strategyFit,typeSummary,
     placeOf,classify,splitNote,rawKeyGroups,rowTypeKey,proxyCap,maxpConvention,
     SHEET,REST_KEYS,GROUPS,PROXY_CAPS,TYPE_KEYS,DISCLAIMER,ANALYSIS,STATE};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchExplain=api;

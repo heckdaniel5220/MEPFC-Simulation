@@ -9,7 +9,7 @@
 
   const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const {PRESETS,OFFERS}=window.GlitchData;
-  const {simulate,prepare}=window.GlitchSim;
+  const {simulate,prepare,accountDetail}=window.GlitchSim;
   const {autoParams,stratFromUi,slipFromUi,slipFields,SLIP_NUM}=window.GlitchParams;
   const Rank=window.GlitchRank;
   // Strategie-Beispiele (M-018b): Modell, Klick-Plan und Aktiv-Prüfung in js/strategiesUi.js
@@ -111,6 +111,7 @@
   const RES=document.querySelector('.results');
   function blocked(msg){
     $('err').textContent=msg; $('err').hidden=false; RES.classList.add('blocked');
+    $('slip-shield').hidden=true;
     last=null;
     EX.onRender();
   }
@@ -203,7 +204,15 @@
     $('slipc').hidden=!slipOn;
     if(slipOn) $('slipc').textContent=`Slippage gesamt: ${usd(R.slipPaid)} auf den Prop-Konten (Ø ${usd(R.slipPaid/n)} je Account). Steckt bereits in Bestehen und Auszahlungen.`;
 
-    last={R,P,instant,slip:slipOn};
+    // Guardian Shield / Max Risk (M-021): Notiz nur bei Angeboten mit Grenze, Hinweis im Slippage-Bereich bei Brüchen durch Slippage
+    const shieldOn=P.shield>0;
+    $('shieldc').hidden=!shieldOn;
+    if(shieldOn) $('shieldc').textContent=shieldNote(R,P);
+    const sw=EXP.shieldWarnText(P);
+    $('slip-shield').hidden=!sw; if(sw) $('slip-shield').textContent=sw;
+
+    // more: nachgerechnete Details ab Account 13 (Cache, verfällt mit jedem neuen Lauf)
+    last={R,P,instant,slip:slipOn,shield:shieldOn,seed,more:new Map()};
     renderList();
     EX.onRender();
   }
@@ -214,8 +223,24 @@
   let last=null;
   const COLS=[['i','#'],['res','Ergebnis'],['trades','Trades'],['days','Tage gesamt'],['pay','Payouts'],['hedge','Echtgeld'],['netNo','Netto ohne'],['netHe','Netto mit']];
   // Mit Slippage (M-017b) zusätzlich „Slippage“ vor den Netto-Spalten
-  const colsOf=slip=>slip?COLS.slice(0,6).concat([['slipPaid','Slippage']],COLS.slice(6)):COLS;
+  const colsOf=(slip,shield)=>COLS.slice(0,6).concat(slip?[['slipPaid','Slippage']]:[],shield?[['shieldBreaches','Shield']]:[],COLS.slice(6));
   const PHN={step1:'Step 1',step2:'Step 2',funded:'Funded'};
+  // Shield (M-021): Spalte „Shield“ vor den Netto-Spalten, nur bei Angeboten mit Grenze
+  const EXP=window.GlitchExplain;
+  const pctDe1=v=>String(Math.round(v*100)/100).replace('.',',');
+  function shieldNote(R,P){
+    const name=EXP.shieldExposure(P).name, hit=R.list.filter(x=>x.shieldBreaches>0).length, lim=`${name} (${usd(P.shield)})`;
+    if(!R.shieldBreaches) return `${lim}: kein Bruch. Nur Funded, Verlust je Trade = Risiko + Slippage + Kosten.`;
+    const tail=' Nur Funded, Verlust je Trade = Risiko + Slippage + Kosten.';
+    return P.shieldStrikes>1
+      ? `${lim}: ${fmt0.format(R.shieldBreaches)} Brüche, ${fmt0.format(hit)} Accounts mit mindestens einem Bruch (ab dann Split ${pctDe1(P.shieldSplit)} %), davon ${fmt0.format(R.shieldLost)} dadurch verloren.${tail}`
+      : `${lim}: ${fmt0.format(R.shieldLost)} Accounts dadurch verloren (1. Bruch = verloren).${tail}`;
+  }
+  function shieldCell(x,P){
+    if(x.shieldLost) return '<span class="neg">verloren</span>';
+    if(x.shieldBreaches>0) return `${x.shieldBreaches} Bruch · Split ${pctDe1(P.shieldSplit)} %`;
+    return '–';
+  }
   function filters(instant){
     return instant
       ? [['all','Alle'],['pass','Ohne Auszahlung verloren'],['paid','Mit Auszahlung']]
@@ -226,23 +251,44 @@
       : x.res==='paid' ? `<span class="pill paid">${x.nPay}× ausgezahlt</span>`
       : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
   }
-  function detail(a,slip){
-    let h=`<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th>${slip?'<th>Slippage-Brüche DLL / DD</th>':''}</tr></thead><tbody>`;
+  function detail(a,slip,P){
+    const shield=P.shield>0;
+    let h=`<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th>${slip?'<th>Slippage-Brüche DLL / DD</th>':''}${shield?'<th>Shield-Brüche</th>':''}</tr></thead><tbody>`;
     let pnl='';
     for(const k of ['step1','step2','funded']){
       const ph=a.phases[k]; if(!ph) continue;
-      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td>${slip?`<td>${ph.dllSlipBreaches} / ${ph.ddSlipBreaches}</td>`:''}</tr>`;
+      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td>${slip?`<td>${ph.dllSlipBreaches} / ${ph.ddSlipBreaches}</td>`:''}${shield?`<td>${k==='funded'?ph.shieldBreaches:'–'}</td>`:''}</tr>`;
       const d=ph.dayPnl, more=d.length>40?` … (${fmt0.format(d.length)} Tage)`:'';
       pnl+=`<p><b>${PHN[k]}</b> Tages-P&amp;L: ${d.slice(0,40).map(v=>`<span class="${v>0?'pos':v<0?'neg':''}">${sgn(v)}</span>`).join(' · ')}${more}</p>`;
     }
     h+=`</tbody></table>${pnl}<p>Echtgeld in der Absicherungsphase ${sgn(a.hedgeEval)}, danach ${sgn(a.hedgeFund)}.</p>`;
+    if(shield){
+      const name=EXP.shieldExposure(P).name, b=a.phases.funded?a.phases.funded.shieldBreaches:0;
+      h+=`<p>${a.shieldLost?`Account durch den ${name} verloren.`:b>0?`${name}: ${b} Bruch, ab dann Split ${pctDe1(P.shieldSplit)} %.`:`${name}: kein Bruch.`}</p>`;
+    }
     if(slip) h+=`<p>Slippage auf dem Prop-Konto ${usd(a.slipPaid)}. Slippage-Brüche: Tageslimit bzw. Drawdown wäre ohne die Slippage dieses Trades nicht gerissen. Der DD-Anteil hängt stark am Raster der Verluste (Vielfache von Risiko + Kosten) und ist nur ein Hinweis.</p>`;
     h+='</div>';
     return h;
   }
+  /* Detail eines Accounts: die ersten 12 aus R.accts, sonst nachgerechnet (Weg B in sim.js, unter 1 ms) und an last gemerkt (max. 50).
+     Stimmt die Gegenprüfung nicht, rechnet der Rückfall (voller Lauf) nach einem setTimeout; bis dahin „Detail wird berechnet …“. */
+  const MORE_MAX=50;
+  function acctOf(i){
+    const L=last;
+    if(i<L.R.accts.length) return L.R.accts[i];
+    if(L.more.has(i)) return L.more.get(i);
+    const keep=a=>{ if(L.more.size>=MORE_MAX) L.more.delete(L.more.keys().next().value); L.more.set(i,a); };
+    const d=accountDetail(L.P,L.seed,L.R.list,i,true);
+    if(d.acct){ keep(d.acct); return d.acct; }
+    if(!L.pending){
+      L.pending=true;
+      setTimeout(()=>{ L.pending=false; keep(accountDetail(L.P,L.seed,L.R.list,i).acct); if(last===L) renderList(); },0);
+    }
+    return null;
+  }
   function renderList(){
     if(!last) return;
-    const {R,P,instant,slip}=last, list=R.list, cols=colsOf(slip);
+    const {R,P,instant,slip,shield}=last, list=R.list, cols=colsOf(slip,shield);
     if(!cols.some(c=>c[0]===LS.sort)){ LS.sort='i'; LS.dir=1; }
     const cnt={all:list.length,fail:0,pass:0,paid:0}; list.forEach(x=>cnt[x.res]++);
     const fl=filters(instant); if(!fl.some(f=>f[0]===LS.filter)) LS.filter='all';
@@ -254,9 +300,10 @@
     const from=LS.page*PAGE, vis=rows.slice(from,from+PAGE);
     let t='<thead><tr>'+cols.map(([c,l])=>`<th aria-sort="${LS.sort===c?(d>0?'ascending':'descending'):'none'}"><button type="button" class="sort" data-k="${c}">${l}${LS.sort===c?(d>0?' ▲':' ▼'):''}</button></th>`).join('')+'</tr></thead><tbody>';
     for(const x of vis){
-      const det=x.i<R.accts.length, open=det&&LS.open===x.i;
-      t+=`<tr${det?` class="clk${open?' open':''}" data-i="${x.i}" tabindex="0" aria-expanded="${open}"`:''}><td>${x.i+1}${det?'<span class="chev" aria-hidden="true"></span>':''}</td><td class="txt">${pill(x,instant)}</td><td>${fmt0.format(x.trades)}</td><td>${fmt0.format(x.days)}</td><td>${x.pay?sgn(x.pay):'–'}</td><td class="${x.hedge>=0?'pos':'neg'}">${P.h?sgn(x.hedge):'–'}</td>${slip?`<td class="${x.slipPaid>0?'neg':''}">${x.slipPaid?sgn(-x.slipPaid):'–'}</td>`:''}<td class="${x.netNo>=0?'pos':'neg'}">${sgn(x.netNo)}</td><td class="${x.netHe>=0?'pos':'neg'}">${sgn(x.netHe)}</td></tr>`;
-      if(open) t+=`<tr class="detrow"><td colspan="${cols.length}">${detail(R.accts[x.i],slip)}</td></tr>`;
+      // Jeder Account lässt sich aufklappen (M-021): die ersten 12 aus R.accts, die übrigen nachgerechnet
+      const open=LS.open===x.i;
+      t+=`<tr class="clk${open?' open':''}" data-i="${x.i}" tabindex="0" aria-expanded="${open}"><td>${x.i+1}<span class="chev" aria-hidden="true"></span></td><td class="txt">${pill(x,instant)}</td><td>${fmt0.format(x.trades)}</td><td>${fmt0.format(x.days)}</td><td>${x.pay?sgn(x.pay):'–'}</td><td class="${x.hedge>=0?'pos':'neg'}">${P.h?sgn(x.hedge):'–'}</td>${slip?`<td class="${x.slipPaid>0?'neg':''}">${x.slipPaid?sgn(-x.slipPaid):'–'}</td>`:''}${shield?`<td class="txt">${shieldCell(x,P)}</td>`:''}<td class="${x.netNo>=0?'pos':'neg'}">${sgn(x.netNo)}</td><td class="${x.netHe>=0?'pos':'neg'}">${sgn(x.netHe)}</td></tr>`;
+      if(open){ const a=acctOf(x.i); t+=`<tr class="detrow"><td colspan="${cols.length}">${a?detail(a,slip,P):'<p class="note" aria-live="polite">Detail wird berechnet …</p>'}</td></tr>`; }
     }
     if(!vis.length) t+=`<tr><td colspan="${cols.length}" class="txt note">Keine Accounts in diesem Filter.</td></tr>`;
     $('trace').innerHTML=t+'</tbody>';
@@ -416,6 +463,14 @@
       : `Auto-Risiko ist aus: Alle Angebote rechnen mit ${usd(val('risk'))} Risiko und ${usd(val('cost'))} Kosten pro Trade aus dem Steuerpult. Kleine Konten sind damit oft nicht handelbar.`;
     const st=slipTxt(uiVals());
     if(st) $('rankRiskHint').textContent+=` ${st}, für alle Angebote gleich${uiVals().slipBuffer>0?' (der Puffer kann das Risiko je Angebot zusätzlich deckeln)':''}.`;
+    // Shield (M-021): Slippage über dem Puffer; nach einem frischen Ranglistenlauf mit Anzahl der betroffenen Zeilen
+    let cnt=null;
+    if(RK.rows && RK.snap && snapKey(RK.snap)===snapKey(snapNow())){
+      const sh=RK.rows.filter(r=>r.P && r.P.shield>0 && r.net!==null && !r.error);
+      cnt={n:sh.length,hit:sh.filter(r=>EXP.shieldExposure(r.P).share>0).length};
+    }
+    const sx=EXP.shieldRankText(uiVals(),cnt);
+    if(sx) $('rankRiskHint').textContent+=' '+sx;
   }
   function rankRun(){
     if(RK.timer) return;
