@@ -209,3 +209,5 @@ input:disabled,input[type=number]:disabled{cursor:not-allowed}
   .ex-costs td:nth-child(2){text-align:left}
   .ex-costs .sub{margin-left:0;max-width:none}
 }
+/* M-016b: lange URLs in der Angebotsnotiz umbrechen (sonst waagrechtes Scrollen bei 390 px seit M-010h) */
+.offer-note{overflow-wrap:anywhere}
