@@ -454,4 +454,121 @@ test('12 Sätze mit Ausreißer-Slippage: jede Zahl mit Quelle, kein verbotenes T
   }
 });
 
+// ---- M-021: Guardian Shield / Max Risk in Regelkosten, Regelblatt und Slippage-Hinweis ----
+const SHIELD_IDS = ALL.filter(x => x.o.shield > 0).map(x => x.o.id);
+const M21_SLIP = [
+  { slipMode: 'fixed', slipPct: 5, slipBuffer: 0 },
+  { slipMode: 'fixed', slipPct: 5, slipBuffer: 5 },
+  { slipMode: 'fixed', slipPct: 10, slipBuffer: 10 },
+  { slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, slipBuffer: 10 },
+  { slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, slipBuffer: 0 }
+];
+const M21_BAD = /umgeh|vermeid|austrick|trick|ausnutz|lücke|gegentrade|hedge|glitch|aushebel/i;
+const m21P = (id, ui) => Sim.prepare(Params.autoParams(byId(id), { wr: 46, rr: 1.5, tradesPerDay: 1, n: 500, ...ui }));
+
+test('M-021 shieldExposure: Anteil > 0 genau dann, wenn der Kern Shield-Brüche zählt (alle Angebote mit Grenze, fünf Slippage-Fälle)', () => {
+  assert.strictEqual(SHIELD_IDS.length, 49);
+  let warn = 0, n = 0;
+  for (const sl of M21_SLIP) for (const id of SHIELD_IDS) {
+    const P = m21P(id, sl), e = Ex.shieldExposure(P), R = Sim.simulate(P, Rank.SEED); n++;
+    assert.strictEqual(e.share > 0, R.shieldBreaches > 0, `${id} ${JSON.stringify(sl)}: Anteil ${e.share}, Brüche ${R.shieldBreaches}`);
+    assert.strictEqual(e.name, byId(id).rules.guardianShieldPct > 0 ? 'Guardian Shield' : 'Max Risk', id);
+    const t = Ex.shieldWarnText(P);
+    assert.strictEqual(t !== null, e.share > 0, id);
+    if (t) {
+      warn++; assert.ok(!M21_BAD.test(t), t);
+      assert.ok(t.includes(e.name) && t.includes(`mindestens ${String(e.need).replace('.', ',')} %`), t);
+      // Puffer = need: Auto-Risiko unter der Grenze, kein Funded-Verlust bricht mehr
+      const P2 = m21P(id, { ...sl, slipBuffer: e.need });
+      assert.strictEqual(Ex.shieldExposure(P2).share, 0, id + ' need');
+      assert.strictEqual(Sim.simulate(P2, Rank.SEED).shieldBreaches, 0, id + ' need Brüche');
+    }
+  }
+  assert.ok(warn >= 49 * 2 && n === 49 * 5, `Hinweise ${warn} von ${n}`);
+});
+
+test('M-021 shieldExposure: Formel fest und Ausreißer, ohne Shield oder Slippage 0', () => {
+  const P = { shield: 500, risk: 485, cost: 10, rules: { guardianShieldPct: 1 } };
+  assert.deepStrictEqual(Ex.shieldExposure({ ...P, slipMode: 'none' }), { share: 0, need: 0, name: 'Guardian Shield', tail: false });
+  assert.deepStrictEqual(Ex.shieldExposure({ ...P, shield: 0, slipMode: 'fixed', slipPct: 50 }), { share: 0, need: 0, name: null, tail: false });
+  // Abstand 5 $: 1 % von 485 $ reicht nicht (4,85 $), 2 % schon (9,70 $)
+  assert.strictEqual(Ex.shieldExposure({ ...P, slipMode: 'fixed', slipPct: 1 }).share, 0);
+  assert.deepStrictEqual(Ex.shieldExposure({ ...P, slipMode: 'fixed', slipPct: 2 }), { share: 1, need: 2, name: 'Guardian Shield', tail: false });
+  assert.deepStrictEqual(Ex.shieldExposure({ ...P, rules: {}, slipMode: 'dist', slipPct: 1, slipTailPct: 100, slipTailProb: 0.02 }), { share: 0.02, need: 100, name: 'Max Risk', tail: true });
+  const both = Ex.shieldExposure({ ...P, slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02 });
+  near(both.share, 1); assert.strictEqual(both.need, 100); assert.strictEqual(both.tail, false);
+  assert.strictEqual(Ex.shieldWarnText({ ...P, slipMode: 'fixed', slipPct: 5, slipBuffer: 0 }),
+    'Slippage über dem Puffer: jeder volle Stop im Funded bricht den Guardian Shield (500 $); Verlust 485 $ + 24,25 $ + 10 $ = 519,25 $. Puffer auf mindestens 5 % erhöhen.');
+  assert.strictEqual(Ex.shieldWarnText({ ...P, rules: {}, slipMode: 'dist', slipPct: 1, slipTailPct: 100, slipTailProb: 0.02 }),
+    'Ausreißer über dem Puffer: 2 % der Verluste im Funded brechen den Max Risk (500 $). Puffer auf mindestens 100 % erhöhen oder Ausreißer senken.');
+});
+
+test('M-021 shieldRankText: nur bei Slippage über dem Puffer, mit Anzahl nach dem Lauf', () => {
+  assert.strictEqual(Ex.shieldRankText({ slipMode: 'none' }), null);
+  assert.strictEqual(Ex.shieldRankText({ slipMode: 'fixed', slipPct: 5, slipBuffer: 5 }), null);
+  assert.strictEqual(Ex.shieldRankText({ slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0, slipBuffer: 5 }), null);
+  const t = Ex.shieldRankText({ slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, slipBuffer: 10 }, { hit: 22, n: 49 });
+  assert.ok(t.includes('Puffer ≥ 100 % verhindert das.') && t.endsWith('Betroffen: 22 von 49 Angeboten mit Grenze.'), t);
+  assert.ok(!M21_BAD.test(t));
+  // Strenge: Puffer ≥ größte Slippage → kein Bruch bei allen 49 Angeboten
+  for (const id of SHIELD_IDS) assert.strictEqual(Sim.simulate(m21P(id, { slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, slipBuffer: 100 }), Rank.SEED).shieldBreaches, 0, id);
+});
+
+test('M-021 Regelkosten: Gruppe Guardian Shield / Max Risk nur mit Grenze, vor Cap, Abschaltung = simulate mit shield 0', () => {
+  const ui = (sl) => ({ ...UI, wr: 46, rr: 1.5, tradesPerDay: 1, ...sl });
+  // ohne Grenze keine Gruppe
+  assert.ok(!ruleCosts(byId('af-zero-25'), UI, deps).groups.some(g => g.key === 'shield'));
+  // ohne Slippage identisch
+  let u = ui({}), row = rankRow('bg-cfd-instant-50', u), c = ruleCosts(byId('bg-cfd-instant-50'), u, deps, row);
+  let g = c.groups.find(x => x.key === 'shield'), keys = c.groups.map(x => x.key);
+  assert.ok(keys.indexOf('shield') >= 0 && (keys.indexOf('cap') < 0 || keys.indexOf('shield') < keys.indexOf('cap')), keys.join());
+  assert.strictEqual(g.state, 'same'); assert.deepStrictEqual(g.off, { shield: 0 }); assert.strictEqual(g.note, null);
+  assert.ok(g.rule.startsWith('Guardian Shield (500 $ je Trade, nur Funded, 1. Bruch Split 48,5 %, 2. Bruch Account verloren)'), g.rule);
+  assert.ok(g.analysis.endsWith('Risiko wie im Grundlauf (der Risikodeckel wird nicht mitgemessen).'));
+  // fest 5 %, Puffer 0: bindet, Δ = direkter Lauf ohne Grenze
+  u = ui({ slipMode: 'fixed', slipPct: 5, slipBuffer: 0 }); row = rankRow('bg-cfd-instant-50', u); c = ruleCosts(byId('bg-cfd-instant-50'), u, deps, row);
+  g = c.groups.find(x => x.key === 'shield');
+  assert.strictEqual(g.state, 'binds'); assert.ok(g.d > 0 && g.shieldLost > 0);
+  near(g.d, direct(row.P, { shield: 0 }).net - row.net, 1e-9, 'Δ');
+  // AC: Grenze beim 1. Bruch
+  row = rankRow('ac-d-50', u); g = ruleCosts(byId('ac-d-50'), u, deps, row).groups.find(x => x.key === 'shield');
+  assert.ok(g.rule.startsWith('Max Risk (500 $ je Trade, nur Funded, 1. Bruch Account verloren)'), g.rule);
+  // ac-pro6-100 mit Ausreißern: Shield-Verluste, aber der harte Tages-DD beendet dieselben Accounts
+  u = ui({ slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, slipBuffer: 10 });
+  row = rankRow('ac-pro6-100', u); g = ruleCosts(byId('ac-pro6-100'), u, deps, row).groups.find(x => x.key === 'shield');
+  assert.strictEqual(g.state, 'same'); assert.ok(g.shieldLost > 0); assert.strictEqual(g.note, Ex.SHIELD_SAME);
+  assert.strictEqual(Ex.SHIELD_SAME, 'Wirkt nicht: dieselben Accounts hätte der Tages-DD beendet.');
+});
+
+test('M-021 shieldCanBreak: ohne mögliche Brüche ist der Lauf ohne Grenze bit-gleich (Regelkosten sparen den zweiten Lauf)', () => {
+  let skipped = 0;
+  for (const sl of [{}].concat(M21_SLIP)) for (const id of SHIELD_IDS) {
+    const P = m21P(id, sl);
+    if (Ex.shieldCanBreak(P)) continue;
+    skipped++;
+    assert.strictEqual(JSON.stringify(Sim.simulate({ ...P, shield: 0 }, Rank.SEED).list), JSON.stringify(Sim.simulate(P, Rank.SEED).list), id);
+  }
+  assert.ok(skipped >= 49 * 3, 'übersprungen: ' + skipped);
+  assert.ok(Ex.shieldCanBreak({ shield: 500, risk: 495, cost: 5, slipMode: 'none' }));
+  assert.ok(!Ex.shieldCanBreak({ shield: 0, risk: 495, cost: 5 }));
+});
+
+test('M-021 Regelblatt: Gruppe Risiko mit Grenze, Split ab dem 1. Bruch und Brüchen bis Verlust', () => {
+  const ent = id => ruleSheet(byId(id)).groups.find(g => g.key === 'risiko').entries;
+  const val = (id, f) => ent(id).find(e => e.field === f);
+  assert.strictEqual(val('bg-cfd-instant-50', 'shield').text, '500 $ (1,0 % der Kontogröße)');
+  assert.strictEqual(val('bg-cfd-instant-50', 'shieldSplit').text, '48,5 %');
+  assert.strictEqual(val('bg-cfd-instant-50', 'shieldStrikes').text, '2');
+  assert.strictEqual(val('ac-d-50', 'shieldStrikes').text, '1');
+  assert.strictEqual(val('ac-d-50', 'shieldSplit').state, 'none-model');
+  for (const f of ['shield', 'shieldSplit', 'shieldStrikes']) assert.strictEqual(val('af-zero-25', f).state, 'none-model', f);
+});
+
+test('M-021 typeSummary: Gruppe Shield als Bezeichnung bekannt', () => {
+  assert.ok(Ex.GROUPS.some(G => G.key === 'shield' && G.label === 'Guardian Shield / Max Risk'));
+  const rows = [{ id: 'x', net: 1, netPer1k: 1, kLo: 0, kHi: 2, payout: 0.5, P: { mode: 'instant' }, market: 'CFD', name: 'X' }];
+  const s = typeSummary(rows, { x: { costliest: 'shield' } });
+  assert.ok(s.types[0].sentences.find(x => x.key === 'typeCost').text.includes('Guardian Shield / Max Risk'));
+});
+
 console.log(`${passed} Tests bestanden`);

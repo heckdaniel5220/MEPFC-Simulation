@@ -130,9 +130,16 @@
      Trade mit risk × (1 + slipBuffer/100) + cost; das DLL wird nach jedem Trade auch bei dllCompliant geprüft.
      Guardian Shield / Max Risk (nur Funded): Verlust eines Trades risk + slip + cost ≥ shield ist ein Bruch (nach dem Drawdown,
      vor dem DLL). Ab dem 1. Bruch gilt shieldSplit für alle folgenden Auszahlungen, der shieldStrikes-te Bruch beendet den Account.
-     Der Trade wird voll gebucht, der Tag läuft weiter. */
-  function simulate(P, seed){
-    const r=mulberry32(seed>>>0), MAXT=500, TPD=P.tradesPerDay||1;
+     Der Trade wird voll gebucht, der Tag läuft weiter.
+     opt (M-021, optional, nicht in P): {from, skip} rechnet nur Account from, Zufallsstrom um skip Ziehungen vorgespult, mit Details;
+     {detail:[i, …]} speichert zusätzlich Details für diese Accounts (R.accts nach den ersten 12, aufsteigend). Ohne opt bit-gleich.
+     INVARIANTE: genau eine r()-Ziehung je ausgeführtem Trade (nur in trade()), R.list[j].trades zählt diese Trades. Der Zustand von
+     mulberry32 wächst je Ziehung um 0x6D2B79F5, Account i startet also bei seed + Σ trades(j < i) · 0x6D2B79F5. Wer eine zweite
+     Ziehung einführt, muss accountDetail anpassen (sonst greift dort nur noch der langsame Rückfall). */
+  function simulate(P, seed, opt){
+    opt=opt||{};
+    const one=opt.from!==undefined, from=one?opt.from:0, to=one?opt.from+1:P.n, extra=opt.detail?new Set(opt.detail):null;
+    const r=mulberry32(((seed>>>0)+Math.imul(opt.skip||0,0x6D2B79F5))>>>0), MAXT=500, TPD=P.tradesPerDay||1;
     const res={accts:[],list:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,slipPaid:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
       hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0,shieldBreaches:0,shieldLost:0};
     const cal=calDay;
@@ -144,10 +151,10 @@
     const LOSSB=P.slipBuffer>0 ? P.risk*(1+P.slipBuffer/100)+P.cost : LOSS, SLIP=P.slipMode!=='none';
     const slipOf=u=>(P.slipMode==='dist' && u<P.slipTailProb ? P.slipTailPct : P.slipPct)/100*P.risk;
     let real=0, cNo=0, cHe=0;
-    for(let i=0;i<P.n;i++){
+    for(let i=from;i<to;i++){
       const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false,slipPaid:0,shieldLost:false,
         phases:{step1:null,step2:null,funded:null}};
-      const detail=i<12;
+      const detail=i<12 || one || (extra!==null && extra.has(i));
       let day=0, evalEnd=0, lastSlip=0, lastLoss=0, sp=P.sp;
       const trade=(hedgeOn,phase)=>{
         const z=r(), win=z<P.p;
@@ -336,6 +343,22 @@
     return res;
   }
 
-  const api={mulberry32,prepare,simulate,calDay};
+  /* Detail eines beliebigen Accounts i nachrechnen (M-021). list = R.list des Laufs mit demselben P und Seed.
+     Weg B: Strom um Σ list[j].trades (j < i) vorspulen und nur Account i rechnen (siehe INVARIANTE bei simulate).
+     Gegenprüfung aller Felder der Zeile gegen list[i]; weicht etwas ab, Rückfall auf Weg A (voller Lauf mit detail:[i]).
+     Ergebnis: {acct, fallback}. lazy = true: ohne Rückfall-Lauf, bei Abweichung {acct:null, fallback:true} (Aufrufer rechnet später). */
+  function accountDetail(P, seed, list, i, lazy){
+    if(!Number.isInteger(i) || i<0 || i>=list.length) throw new Error('accountDetail: Index außerhalb: '+i);
+    let skip=0; for(let j=0;j<i;j++) skip+=list[j].trades;
+    const R=simulate(P,seed,{from:i,skip}), row=R.list[0], want=list[i];
+    const keys=Object.keys(want);
+    const same=keys.length===Object.keys(row).length && keys.every(k=>Object.is(row[k],want[k]));
+    if(same) return {acct:R.accts[0],fallback:false};
+    if(lazy) return {acct:null,fallback:true};
+    const A=simulate(P,seed,{detail:[i]});
+    return {acct:i<12?A.accts[i]:A.accts[12],fallback:true};
+  }
+
+  const api={mulberry32,prepare,simulate,calDay,accountDetail};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchSim=api;
 })(typeof self!=='undefined'?self:this);

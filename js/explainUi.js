@@ -139,18 +139,21 @@
   // Hinweiszeile zur Slippage über der Tabelle (E2); bei „aus“ keine Zeile
   const slipLine=slip=>slip?`<p class="note ex-slip">Gerechnet mit: ${esc(slip)} (Strategie, keine Firmenregel).</p>`:'';
   // Regelkosten-Tabelle mit festem Analyse-Hinweis; slip = Kurztext der Slippage (null bei aus)
+  const SHIELD_EXTRA=(Ex.GROUPS.find(G=>G.key==='shield')||{}).extra||'';
   function costsHtml(c,slip){
     const head=`<p class="note ex-analysis">${esc(Ex.ANALYSIS)}</p>`+slipLine(slip);
     if(c===null) return head+'<p class="note">Nicht handelbar: keine Regelkosten.</p>';
     if(c && c.error) return head+`<p class="note">Regelkosten nicht berechenbar: ${esc(c.error)}</p>`;
     const b=c.base;
     const base=`<p class="note">Grundlauf: im Mittel ${sMny(b.net)} je Account (Spanne ${mny(b.netLo)} bis ${mny(b.netHi)}), n = ${num(c.n)}, Seed ${esc(c.seed)}. Δ = Netto mit abgeschalteter Regel − Netto mit Regel, Spanne 95 % gepaart je Account.</p>`;
-    if(!c.groups.length) return head+base+'<p class="note">Keine der geprüften Regelgruppen (Tageslimit, Consistency, Tage, Kalender, Cap, Monatsabo) ist bei diesem Angebot aktiv.</p>';
+    if(!c.groups.length) return head+base+'<p class="note">Keine der geprüften Regelgruppen (Tageslimit, Consistency, Tage, Kalender, Guardian Shield / Max Risk, Cap, Monatsabo) ist bei diesem Angebot aktiv.</p>';
     let t='<div class="tbl"><table class="list ex-costs"><thead><tr><th>Regel</th><th>Δ je Account</th><th>Zustand</th></tr></thead><tbody>';
     for(const g of c.groups){
       const sub=[];
       sub.push(g.exact?'exakt aus den gezahlten Gebühren':g.state==='same'?`alle ${num(g.n)} Accounts identisch`:`Spanne ${mny(g.lo)} bis ${mny(g.hi)}`);
       if(g.payBinds) sub.push(`Payout-Quote ${pp(g.dPay)} Prozentpunkte (${num(g.payLo*100,1)} bis ${num(g.payHi*100,1)})`);
+      // Shield (M-021): Risikodeckel nicht mitgemessen; identisch trotz Shield-Verlusten → Tages-DD
+      if(g.key==='shield'){ sub.push(SHIELD_EXTRA); if(g.note) sub.push(g.note); }
       if(g.control) sub.push(`mit max. ${num(g.control.maxp)} Auszahlungen ${sMny(g.control.d)} (${mny(g.control.lo)} bis ${mny(g.control.hi)})`);
       const cls=g.state==='binds'?(g.d>0?'pos':'neg'):'';
       const state=esc(g.stateText)+(g.maxpArtifact?'<span class="sub">Modellannahme max. Auszahlungen (Konvention)</span>':'');
@@ -163,7 +166,7 @@
       +`<p class="note" aria-live="polite">Regelkosten werden gerechnet (${num(done)} / ${num(Math.max(done,expected))} Läufe).</p>`;
   }
   // erwartete Läufe: Grundlauf + je aktiver Gruppe mit eigenem Lauf (Kontrollläufe kommen bei Bedarf dazu)
-  const expectedRuns=P=>1+Ex.GROUPS.filter(G=>!G.exact && G.on(P)).length;
+  const expectedRuns=P=>1+Ex.GROUPS.filter(G=>!G.exact && G.on(P) && (G.key!=='shield' || Ex.shieldCanBreak(P))).length;
 
   // Regelblatt: je Gruppe ein details; Felder ohne Angabe gesammelt am Ende
   const MISSING=['missing','null'];
