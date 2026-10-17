@@ -376,4 +376,76 @@ test('8 Laufzeit: ruleCosts je Angebot unter 0,5 s (n 1000), alle 116 ohne Fehle
   assert.strictEqual(Object.keys(all).length, 116);
 });
 
+// ---- M-016b: schrittweise Regelkosten und Slippage in den Sätzen ----
+const fs = require('fs');
+const SLIP10 = { slipMode: 'fixed', slipPct: 10, slipBuffer: 0 };
+const strat = (wr, extra) => Object.assign(Params.stratFromUi(Object.assign({ wr, rr: 1.5, riskPct: 25, costPct: 2, autorisk: true }, extra || {}), { n: 1000 }), { seed: 20261015 });
+
+test('9 ruleCostsSteps: leer gelaufen = ruleCosts, ein yield je simulate-Aufruf', () => {
+  for (const ui of [strat(40), strat(46), strat(46, Params.slipFromUi(SLIP10))]) {
+    const rows = Rank.rankOffers(OFFERS.map(g => ({ g: g.g, items: g.items.filter(o => ONE_PER_FIRM.includes(o.id)) })), ui, deps);
+    for (const row of rows) {
+      let calls = 0;
+      const d = Object.assign({}, deps, { simulate: (P, sd) => { calls++; return Sim.simulate(P, sd); } });
+      const it = Ex.ruleCostsSteps(byId(row.id), ui, d, row);
+      let steps = 0, r = it.next();
+      while (!r.done) { steps++; assert.strictEqual(steps, calls, `${row.id}: Schritt ohne Lauf`); r = it.next(); }
+      assert.strictEqual(steps, calls, row.id);
+      assert.ok(steps >= 1, row.id);
+      assert.deepStrictEqual(r.value, ruleCosts(byId(row.id), ui, deps, row), row.id);
+    }
+  }
+});
+
+test('10 slipMean = Formel der Oberfläche (app.js, M-017b E8)', () => {
+  const src = fs.readFileSync(require.resolve('../js/app.js'), 'utf8');
+  const m = /const sBar=([^,]+?:[^,]+?:0), s=sBar\/100\*P\.risk;/.exec(src);
+  assert.ok(m, 'Formel sBar in app.js nicht gefunden');
+  const appS = new Function('P', `const sBar=${m[1]}; return sBar/100*P.risk;`);
+  const cases = [
+    { slipMode: 'none', risk: 500 }, { risk: 500 }, { slipMode: 'fixed', slipPct: 10, risk: 500 }, { slipMode: 'fixed', slipPct: 2.5, risk: 335 },
+    { slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 0.02, risk: 500 }, { slipMode: 'dist', slipPct: 0, slipTailPct: 300, slipTailProb: 0.141, risk: 125 },
+    { slipMode: 'dist', slipPct: 7, slipTailPct: 50, slipTailProb: 0, risk: 1000 }];
+  for (const P of cases) {
+    const a = appS(Object.assign({ slipMode: 'none' }, P)), b = Ex.slipMean(P);
+    near(b, a, 1e-9, JSON.stringify(P));
+  }
+  assert.strictEqual(Ex.slipMean({ slipMode: 'fixed', slipPct: 10, risk: 500 }), 50);
+  assert.strictEqual(Ex.slipMean({ risk: 500 }), 0);
+});
+
+test('11 Sätze mit Slippage: Erwartungswert, Verlustserie und Tageslimit mit mittlerer Slippage, ohne Slippage wie bisher', () => {
+  const o = byId('af-std-50');
+  const row0 = Rank.rankOffers([{ g: gOf('af-std-50'), items: [o] }], strat(46), deps)[0];
+  const f0 = strategyFit(o, strat(46), row0, null, [row0]);
+  assert.strictEqual(f0.reasons.find(s => s.key === 'target').text,
+    'Ziel 3.000 $ = 1,5 × Drawdown 2.000 $. Bei 500 $ Risiko, CRV 1,5 und 10 $ Kosten bringt ein Trade im Mittel 65 $, also rund 47 Trades bis zum Ziel; bestanden haben 45 % der Accounts.');
+  assert.strictEqual(f0.reasons.find(s => s.key === 'losses').text, '4 Verlust-Trades in Folge (je 510 $) erreichen den Drawdown von 2.000 $.');
+  const ui = strat(46, Params.slipFromUi(SLIP10));
+  const rows = Rank.rankOffers(OFFERS, ui, deps);
+  const row = rows.find(r => r.id === 'af-std-50'), c = ruleCosts(o, ui, deps, row);
+  const f = strategyFit(o, ui, row, c, rows);
+  const t2 = f.reasons.find(s => s.key === 'target').text, t3 = f.reasons.find(s => s.key === 'losses').text;
+  assert.ok(t2.includes('10 $ Kosten und im Mittel 50 $ Slippage je Verlust bringt ein Trade im Mittel 38 $, also rund 79 Trades bis zum Ziel'), t2);
+  assert.strictEqual(t3, '4 Verlust-Trades in Folge (je im Mittel 560 $ inkl. Slippage) erreichen den Drawdown von 2.000 $.');
+  const d = f.more.find(s => s.key === 'dllSame');
+  assert.ok(d && d.text.includes('im Mittel 560 $ Verlust je Trade inkl. Slippage nie'), d && d.text);
+  for (const s of f.reasons.concat(f.more)) checkSentence(s, { row, costs: c, fit: f });
+  // Regelkosten rechnen mit der Slippage: ac-d-50 Consistency
+  const a = byId('ac-d-50'), ra = rows.find(r => r.id === 'ac-d-50'), ca = ruleCosts(a, ui, deps, ra);
+  const g = ca.groups.find(x => x.key === 'cons');
+  assert.strictEqual(Math.round(g.d), -474);
+  assert.strictEqual(g.state, 'binds');
+});
+
+test('12 Sätze mit Ausreißer-Slippage: jede Zahl mit Quelle, kein verbotenes Thema (je Anbieter)', () => {
+  const ui = strat(40, Params.slipFromUi({ slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 2, slipBuffer: 0 }));
+  const rows = Rank.rankOffers(OFFERS, ui, deps);
+  for (const id of ONE_PER_FIRM) {
+    const row = rows.find(r => r.id === id), c = ruleCosts(byId(id), ui, deps, row);
+    const f = strategyFit(byId(id), ui, row, c, rows);
+    for (const s of f.reasons.concat(f.more)) checkSentence(s, { row, costs: c, fit: f });
+  }
+});
+
 console.log(`${passed} Tests bestanden`);

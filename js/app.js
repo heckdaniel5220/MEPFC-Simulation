@@ -110,6 +110,7 @@
   function blocked(msg){
     $('err').textContent=msg; $('err').hidden=false; RES.classList.add('blocked');
     last=null;
+    EX.onRender();
   }
   const hasDays=P=>(P.mode==='challenge'&&(P.evalMinDays>0||P.evalWinDays>0))||P.payMinDays>0||P.payWinDays>0;
   function ruleHint(P,off){
@@ -202,6 +203,7 @@
 
     last={R,P,instant,slip:slipOn};
     renderList();
+    EX.onRender();
   }
 
   // ---- Account-Tabelle: alle n Accounts, 50 pro Seite, Filter und Sortierung; nur die sichtbare Seite wird gebaut ----
@@ -403,6 +405,7 @@
   function checkStale(){
     $('rankStale').hidden=!RK.snap || snapKey(RK.snap)===snapKey(snapNow());
     riskHint();
+    EX.refresh();
   }
   function riskHint(){
     $('rankRiskHint').textContent=$('autorisk').checked
@@ -415,6 +418,7 @@
     if(RK.timer) return;
     const snap=snapNow();
     RK.snap=snap; RK.rows=null; RK.aborted=false;
+    EX.onRankStart();
     RK.state=Rank.createRankState(OFFERS,Object.assign({},snap.strat,{seed:snap.seed,today:today()}),{simulate,prepare,autoParams});
     $('rankGo').disabled=true; $('rankStop').hidden=false; $('rankStale').hidden=true;
     const t0=performance.now();
@@ -494,7 +498,7 @@
         : '–';
       const cell=(v,f)=>ok&&v!==null?f(v):'–';
       t+=`<tr class="clk${ok?'':' nt'}" data-id="${r.id}" tabindex="0" title="In die Hauptsimulation übernehmen">`
-        +`<td>${ok?place:'–'}</td><td class="txt firm">${r.firm}</td><td class="txt offer">${o?o.n:r.name}<span class="sub">${r.market} · ${r.type==='instant'?'Instant':'Challenge'}${r.size?' · '+kTxt(r.size):''}</span></td>`
+        +`<td>${ok?place:'–'}</td><td class="txt firm">${r.firm}</td><td class="txt offer">${o?o.n:r.name}<span class="sub">${window.GlitchExplain.rowTypeKey(r)}${r.size?' · '+kTxt(r.size):''}</span></td>`
         +`<td>${fee$(r.fee)}${feeSub}</td>`
         +`<td class="${ok?(r.net>=0?'pos':'neg'):''}">${ok?`${sgn(r.net)}<span class="sub">± ${usd(r.netHalf)}${hedge?` · mit Gegentrade ${sgn(r.netHe)}`:''}</span>`:'–'}</td>`
         +`<td>${cell(r.roi,pct0)}</td><td>${cell(r.netPer1k,sgn)}</td>`
@@ -507,6 +511,7 @@
     $('rankTbl').innerHTML=t+'</tbody>';
     $('rankWrap').hidden=false;
     $('rankCount').textContent=`${fmt0.format(sorted.length)} von ${fmt0.format(RK.rows.length)} Angeboten${RK.aborted?` (abgebrochen, ${fmt0.format(ALL_OFFERS-RK.rows.length)} nicht berechnet)`:''}. Seed ${RK.snap.seed}${slipTxt(RK.snap.strat)?', '+slipTxt(RK.snap.strat):''}, ${fmt0.format(RK.snap.n)} Accounts je Angebot${hedge?'':', ohne Gegentrade'}.`;
+    EX.onRank();
   }
   // Klick: Angebot mit dem Schnappschuss der Berechnung übernehmen (Strategie, n, Gegentrade, Seed), dann zu den Kennzahlen
   function rankPick(id){
@@ -527,6 +532,12 @@
   ['fMarkt','fFirma','fTyp','fFee','fSizeMin','fSizeMax'].forEach(id=>$(id).addEventListener('input',renderRank));
   ['rankN','rankHedge'].forEach(id=>$(id).addEventListener('input',checkStale));
   $('ctl').addEventListener('input',checkStale); $('ctl').addEventListener('change',checkStale);
+
+  // Erklärungen (M-016b): gewähltes Angebot, Rangliste und Slippage-Kurztext für js/explainUi.js
+  const EX=window.GlitchExplainUi.mount({offers:OFFERS,deps:{simulate,prepare,autoParams,rank:Rank},slipTxt,
+    selected:()=>$('offer').value?{id:$('offer').value,P0:read(),R:last?last.R:null,seed}:null,
+    rank:()=>RK.snap?{rows:RK.rows,filtered:RK.rows?Rank.filterRows(RK.rows,curFilter()):null,seed:RK.snap.seed,tag:RK.snap,running:!!RK.timer,aborted:RK.aborted,
+      stale:snapKey(RK.snap)!==snapKey(snapNow())}:null});
 
   apply(PRESETS.futures); setPressed('p-futures'); render(); riskHint();
 })();
