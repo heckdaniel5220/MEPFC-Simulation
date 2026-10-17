@@ -64,6 +64,7 @@
 
       <fieldset>
         <legend>Trading</legend>
+        <details class="strats" id="strats" open><summary>Strategie-Beispiele</summary><div id="strat-b"></div></details>
         <div class="ctl"><div class="row"><label for="risk">Risiko pro Trade</label><output id="risk-o"></output></div><input type="range" id="risk" min="5" max="3000" step="5"></div>
         <div class="ctl"><div class="row"><label for="rr">Chance-Risiko (CRV)</label><output id="rr-o"></output></div><input type="range" id="rr" min="0.5" max="4" step="0.1"></div>
         <div class="ctl"><div class="row"><label for="wr">Trefferquote</label><output id="wr-o"></output></div><input type="range" id="wr" min="10" max="80" step="1"><small id="wr-hint"></small></div>
@@ -204,6 +205,8 @@
 <script src="js/rank.js"></script>
 <script src="js/explain.js"></script>
 <script src="js/explainUi.js"></script>
+<script src="js/strategies.js"></script>
+<script src="js/strategiesUi.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

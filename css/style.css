@@ -211,3 +211,19 @@ input:disabled,input[type=number]:disabled{cursor:not-allowed}
 }
 /* M-016b: lange URLs in der Angebotsnotiz umbrechen (sonst waagrechtes Scrollen bei 390 px seit M-010h) */
 .offer-note{overflow-wrap:anywhere}
+/* Strategie-Beispiele (M-018b): oben im Bereich „Trading“, eigener Selektor (nicht .presets) */
+.strats{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--sunk)}
+.strats>summary{font-weight:700;font-size:14px;cursor:pointer;padding:2px 0}
+.strats>div{margin-top:8px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.strats p{margin:0}
+.strat-list{display:flex;flex-direction:column;gap:6px}
+.strat-list button{font:inherit;font-size:14px;font-weight:600;text-align:left;width:100%;min-width:0;min-height:44px;
+  display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:7px 10px;cursor:pointer;
+  border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.strat-list button:hover{border-color:var(--muted)}
+.strat-list button[aria-pressed="true"]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.strat-list button:focus-visible{outline:2px solid var(--nohedge);outline-offset:2px}
+.strat-list .st-name{line-height:1.3}
+.strat-list .st-sub{font-size:12px;font-weight:500;color:var(--muted);font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.pill.st-yes{background:color-mix(in srgb,var(--pos) 15%,transparent);color:var(--pos)}
+.pill.st-no{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
