@@ -8,7 +8,7 @@
   const $ = id => document.getElementById(id);
 
   const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
-  const {PRESETS,OFFERS}=window.GlitchData;
+  const {PRESETS,PRESET_NOTES,OFFERS}=window.GlitchData;
   const {simulate,prepare,accountDetail}=window.GlitchSim;
   const {autoParams,stratFromUi,slipFromUi,slipFields,SLIP_NUM}=window.GlitchParams;
   const Rank=window.GlitchRank;
@@ -417,12 +417,16 @@
 
   let tm; const schedule=()=>{clearTimeout(tm);tm=setTimeout(render,60);};
   // Presets = Video-Szenarien mit festen Werten (M-013): Hinweis, solange eines gedrückt ist, bei zwei ein Knopf zum echten Angebot
-  const PRESET_KEYS=[['p-futures','futures'],['p-coin','coin'],['p-edge','edge'],['p-instant','instant'],['p-afstd','afstd']];
-  const PRESET_OFFER={afstd:'af-std-50',instant:'ac-d-50'};
+  const PRESET_KEYS=[['p-futures','futures'],['p-coin','coin'],['p-edge','edge'],['p-instant','instant'],['p-afstd','afstd'],['p-whiteboard','whiteboard']];
+  const PRESET_OFFER={afstd:'af-std-50',instant:'ac-d-50',whiteboard:'af-std-50'};
   const setPressed=id=>{
     document.querySelectorAll('.presets button').forEach(b=>b.setAttribute('aria-pressed',b.id===id?'true':'false'));
     const k=(PRESET_KEYS.find(p=>p[0]===id)||[])[1], o=k&&OFFER_BY[PRESET_OFFER[k]], b=$('preset-offer');
     $('preset-note').hidden=!k;
+    // Eigener Hinweis je Szenario (M-022, Texte aus PRESET_NOTES), nur Textknoten
+    const ex=$('preset-extra'), notes=(k&&PRESET_NOTES[k])||[];
+    ex.replaceChildren(...notes.map(s=>{const q=document.createElement('p'); q.textContent=s; return q;}));
+    ex.hidden=!notes.length;
     b.hidden=!o;
     if(o){ b.dataset.id=o.id; b.textContent=`Echtes Angebot wählen: ${o.firm} ${o.n}`; }
   };
