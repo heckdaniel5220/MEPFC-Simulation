@@ -117,6 +117,25 @@
         P.reason=`Risiko + Kosten (${P.risk+P.cost} $) erreichen das Tageslimit (${lim} $). Kein Trade möglich. Risiko senken oder „Risiko & Kosten an Account-Größe anpassen“ einschalten.`;
       }
     }
+    // Guardian Shield / Max Risk (M-019): ein voller Stop mit Puffer und Kosten muss unter der Grenze bleiben (prepare zählt ≥ als Bruch)
+    if(!P.notTradable && P.shield>0 && need(P.risk,P.cost)>=P.shield){
+      const name=P.rules&&P.rules.guardianShieldPct>0?'Guardian Shield':'Max Risk', what=bufP>0?`Risiko mit Puffer ${de(bufP)} % + Kosten`:'Risiko + Kosten';
+      if(auto){
+        const from=P.risk;
+        let r=Math.floor(Math.min(from,P.shield)/5)*5;
+        while(r>=5 && need(r,autoCost(r,costPct))>=P.shield) r-=5;
+        if(r>=5){
+          P.risk=r; P.cost=autoCost(r,costPct); P.riskCapped=true;
+          P.reason=(P.reason?P.reason+' ':'')+`Risiko auf ${r} $ gedeckelt (statt ${from} $), damit ${what} (${de(need(r,P.cost))} $) unter dem ${name} (${de(P.shield)} $) bleiben.`;
+        } else {
+          P.notTradable=true;
+          P.reason=`Auch mit 5 $ Risiko erreichen ${what} (${de(need(5,autoCost(5,costPct)))} $) den ${name} (${de(P.shield)} $). Kein Trade möglich.`;
+        }
+      } else {
+        P.notTradable=true;
+        P.reason=`${what} (${de(need(P.risk,P.cost))} $) erreichen den ${name} (${de(P.shield)} $). Jeder volle Stop wäre ein Bruch.`;
+      }
+    }
     // Gewinntage (M-004): Schwelle, die selbst ein Tag nur mit Gewinn-Trades nicht erreicht, prüft prepare() ebenfalls
     if(!P.notTradable && P.rr!==undefined){
       const dayMax=(P.tradesPerDay||1)*(P.risk*P.rr-P.cost);

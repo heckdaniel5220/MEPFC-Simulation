@@ -156,7 +156,8 @@ test('8 HTML: Analyse-Hinweis, Slippage-Zeile nur bei Slippage, Kontrolllauf, Mo
   assert.ok(t.includes(Ex.ANALYSIS));
   assert.ok(!t.includes('Strategie, keine Firmenregel'));
   assert.ok(t.includes('mit max. 1.000 Auszahlungen'), 'Kontrolllauf-Zeile');
-  assert.ok(t.includes('−1.278 $'), 'Consistency Δ');
+  // M-019: Risiko 485 statt 500 $ wegen Max-Risk-Deckel
+  assert.ok(t.includes('−1.184 $'), 'Consistency Δ');
   const hs = U.plain(U.costsHtml(c, 'Slippage am Stop fest 10 % des Risikos'));
   assert.ok(hs.includes('Gerechnet mit: Slippage am Stop fest 10 % des Risikos (Strategie, keine Firmenregel).'));
   // Modellannahme maxp an einer konstruierten Gruppe

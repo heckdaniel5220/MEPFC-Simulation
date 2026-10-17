@@ -83,6 +83,14 @@
       chkB('dllFunded',P.dllFunded);
       if(P.dllScaleFunded>0) chkB('Scaling: max(dllFunded, dllScaleFunded × dllScaleFrom)',Math.max(P.dllFunded,P.dllScaleFunded*P.dllScaleFrom));
     }
+    // Guardian Shield / Max Risk (M-019): offener Verlust eines Funded-Trades (risk + Slippage + cost) ≥ shield ($) ist ein Bruch, 0 = aus
+    for(const k of ['shield','shieldSplit']){
+      if(P[k]===undefined) P[k]=k==='shield'?0:50;
+      if(typeof P[k]!=='number' || !Number.isFinite(P[k]) || P[k]<0) throw new Error(k+' muss eine Zahl ≥ 0 sein: '+JSON.stringify(P[k]));
+    }
+    if(P.shieldSplit>100) throw new Error('shieldSplit muss eine Zahl in [0, 100] sein: '+JSON.stringify(P.shieldSplit));
+    if(P.shieldStrikes===undefined) P.shieldStrikes=2;
+    if(!Number.isInteger(P.shieldStrikes) || P.shieldStrikes<1) throw new Error('shieldStrikes muss eine Ganzzahl ≥ 1 sein: '+JSON.stringify(P.shieldStrikes));
     P.p=P.wr/100; P.h=P.hp/100; P.wf=P.wfrac/100; P.sp=P.split/100;
     return P;
   }
@@ -119,14 +127,17 @@
      Die Höhe kommt aus der Lage der Zufallszahl im Verlustbereich (u = (r − p)/(1 − p)), keine weitere Zufallszahl.
      Gewinn-Trades (Take-Profit als Limit) ohne Slippage. Gegentrade: bei Prop-Verlust genau h × risk (keine Slippage zu
      seinen Gunsten), bei Prop-Gewinn rutscht sein eigener Stop um h × slip (u = r/p). Der regeltreue Trader prüft vor dem
-     Trade mit risk × (1 + slipBuffer/100) + cost; das DLL wird nach jedem Trade auch bei dllCompliant geprüft. */
+     Trade mit risk × (1 + slipBuffer/100) + cost; das DLL wird nach jedem Trade auch bei dllCompliant geprüft.
+     Guardian Shield / Max Risk (nur Funded): Verlust eines Trades risk + slip + cost ≥ shield ist ein Bruch (nach dem Drawdown,
+     vor dem DLL). Ab dem 1. Bruch gilt shieldSplit für alle folgenden Auszahlungen, der shieldStrikes-te Bruch beendet den Account.
+     Der Trade wird voll gebucht, der Tag läuft weiter. */
   function simulate(P, seed){
     const r=mulberry32(seed>>>0), MAXT=500, TPD=P.tradesPerDay||1;
     const res={accts:[],list:[],cumNo:[0],cumHe:[0],cumReal:[0],fees:0,pay:0,hedge:0,slipPaid:0,realMin:0,fail:0,passNo:0,paid:0,passed:0,nPayTot:0,
-      hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0};
+      hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0,shieldBreaches:0,shieldLost:0};
     const cal=calDay;
     const PH=['step1','step2','funded'], sum={}, toPass=[];
-    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0};
+    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,shieldBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0};
     const delays=[], dDelays=[], firstPays=[], firstPayCals=[]; let hitN=0, hitFail=0;
     const LOSS=P.risk+P.cost, hard=P.dllType==='hard';
     // Slippage (M-017): Vorabprüfung des regeltreuen Traders mit Puffer
@@ -134,23 +145,23 @@
     const slipOf=u=>(P.slipMode==='dist' && u<P.slipTailProb ? P.slipTailPct : P.slipPct)/100*P.risk;
     let real=0, cNo=0, cHe=0;
     for(let i=0;i<P.n;i++){
-      const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false,slipPaid:0,
+      const a={passed:P.mode==='instant',pay:0,hedgeEval:0,hedgeFund:0,trades:0,nPay:0,blown:false,slipPaid:0,shieldLost:false,
         phases:{step1:null,step2:null,funded:null}};
       const detail=i<12;
-      let day=0, evalEnd=0, lastSlip=0;
+      let day=0, evalEnd=0, lastSlip=0, lastLoss=0, sp=P.sp;
       const trade=(hedgeOn,phase)=>{
         const z=r(), win=z<P.p;
         // Slippage-Höhe aus der Lage von z im Verlust- bzw. Gewinnbereich (dort jeweils gleichverteilt)
         let slip=0, hslip=0;
         if(SLIP){ if(!win) slip=slipOf((z-P.p)/(1-P.p)); else if(hedgeOn) hslip=slipOf(z/P.p); }
         const gross = win ? P.risk*P.rr : -P.risk-slip;
-        a.trades++; a.slipPaid+=slip; lastSlip=slip;
+        a.trades++; a.slipPaid+=slip; lastSlip=slip; lastLoss=win?0:P.risk+slip+P.cost;
         // Gegentrade: Take-Profit (Prop-Verlust) als Limit ohne Slippage, eigener Stop (Prop-Gewinn) mit h × Slippage
         if(hedgeOn){ const hv=win ? -P.h*gross - P.h*hslip - P.h*P.cost : P.h*P.risk - P.h*P.cost; if(phase==='e') a.hedgeEval+=hv; else a.hedgeFund+=hv; real+=hv; if(real<res.realMin) res.realMin=real; }
         return gross-P.cost;
       };
       // Tageszähler einer Phase; ein Tag zählt nur mit mindestens einem Trade
-      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,firstPayDay:null,payDays:[],bestDay:[]}; a.phases[k]=ph; return ph; };
+      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,shieldBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,firstPayDay:null,payDays:[],bestDay:[]}; a.phases[k]=ph; return ph; };
       // DLL vor dem Trade (regeltreu): true = Trade verweigert, Tag endet
       const refuse=(ph,lim,pnl)=>{ if(lim>0 && P.dllCompliant && pnl-LOSSB<=-lim){ ph.dllStops++; return true; } return false; };
       // DLL nach dem Trade: 0 = weiter, 1 = Tag endet (soft), 2 = Bruch (hard)
@@ -165,6 +176,8 @@
       };
       // DD-Bruch durch Slippage: ohne die Slippage dieses Trades bliebe eq über dem Floor
       const ddSlip=(ph,eq,floor)=>{ if(eq+lastSlip>floor) ph.ddSlipBreaches++; };
+      // Guardian Shield: offener Verlust des Trades (risk + Slippage + cost) erreicht die Grenze
+      const shieldHit=()=>P.shield>0 && lastLoss>0 && lastLoss>=P.shield;
       // Consistency: true = Bestehen bzw. Auszahlung erlaubt
       const consOk=(pct,best,pnl,gain)=>!(pct>0) || Math.max(best,pnl) < pct/100*gain;
       // Blockade höchstens einmal pro Tag zählen
@@ -224,7 +237,7 @@
         // Kalender: frühester Kalendertag der nächsten Auszahlung
         const unlock=()=>a.nPay===0 ? calFirst+P.payFirstAfterCal : calLast+P.payEveryCal;
         const pay=()=>{
-          const w=Math.min(P.cap,(eq-P.buf)*P.wf); eq-=w; a.pay+=w*P.sp; a.nPay++; base=eq; calLast=cal(day);
+          const w=Math.min(P.cap,(eq-P.buf)*P.wf); eq-=w; a.pay+=w*sp; a.nPay++; base=eq; calLast=cal(day);
           if(ph.firstPayDay===null) ph.firstPayDay=day;
           if(detail) ph.payDays.push(day);
         };
@@ -249,6 +262,8 @@
             const x=trade(P.h>0 && (P.hfund||protect), protect?'e':'f'); t++; pnl+=x;
             eq+=x; if(eq>peak) peak=eq;
             const floor=P.ddStatic?-P.dd:Math.min(peak-P.dd,0); if(eq<=floor){ddSlip(ph,eq,floor);a.blown=true;break;}
+            // Shield nach dem Drawdown, vor dem DLL: 1. Bruch Split, letzter Bruch Account verloren
+            if(shieldHit()){ ph.shieldBreaches++; if(ph.shieldBreaches>=P.shieldStrikes){ a.shieldLost=true; a.blown=true; break; } sp=P.shieldSplit/100; }
             const b=breach(ph,lim,pnl,k+1<TPD && t<MAXT); if(b===2){a.blown=true;break;} if(b===1) break;
             // Auszahlung beendet den Tag (kein Phasenwechsel)
             // Zyklus: ctd/cwd = abgeschlossene Handels- bzw. Gewinntage seit der letzten Auszahlung
@@ -274,7 +289,7 @@
           if(eq>peakEod) peakEod=eq;
         }
       }
-      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].dllSlipBreaches+=ph.dllSlipBreaches; sum[k].ddSlipBreaches+=ph.ddSlipBreaches; sum[k].consBlocks+=ph.consBlocks; sum[k].daysBlocks+=ph.daysBlocks; sum[k].calBlocks+=ph.calBlocks; } }
+      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].dllSlipBreaches+=ph.dllSlipBreaches; sum[k].ddSlipBreaches+=ph.ddSlipBreaches; sum[k].shieldBreaches+=ph.shieldBreaches; sum[k].consBlocks+=ph.consBlocks; sum[k].daysBlocks+=ph.daysBlocks; sum[k].calBlocks+=ph.calBlocks; } }
       if(P.mode==='challenge' && a.passed) toPass.push(a.phases.step1.days+(a.phases.step2?a.phases.step2.days:0));
       const fpd=a.phases.funded?a.phases.funded.firstPayDay:null;
       if(fpd!==null){ firstPays.push(fpd); firstPayCals.push(cal(fpd)); }
@@ -286,6 +301,7 @@
       if(success){res.hSucc+=a.hedgeEval;res.nSucc++;} else {res.hFail+=a.hedgeEval;res.nFail++;}
       res.hAfter+=a.hedgeFund;
       a.netNo=a.pay-a.feesPaid; a.netHe=a.netNo+a.hedge;
+      const shB=a.phases.funded?a.phases.funded.shieldBreaches:0; res.shieldBreaches+=shB; if(a.shieldLost) res.shieldLost++;
       res.fees+=a.feesPaid; res.pay+=a.pay; res.slipPaid+=a.slipPaid; res.hedge+=a.hedge; res.nPayTot+=a.nPay;
       if(a.passed) res.passed++;
       if(!a.passed) res.fail++; else if(a.nPay===0) res.passNo++; else res.paid++;
@@ -295,16 +311,16 @@
       // Kompakte Zeile je Account (alle n): Ergebnis 'fail' (Challenge verloren), 'pass' (ohne Auszahlung), 'paid' (≥ 1 Auszahlung)
       // daysToFirstPay: Tagesnummer der 1. Auszahlung ab Account-Start (inkl. Challenge), ohne Auszahlung null
       // calDays: Kalendertag des letzten Account-Tags, calToFirstPay: Kalendertag der 1. Auszahlung (ohne null), feesPaid: alle Gebühren
-      // slipPaid: Summe der Slippage in $ auf dem Prop-Konto
+      // slipPaid: Summe der Slippage in $ auf dem Prop-Konto; shieldBreaches/shieldLost: Shield-Brüche, Account durch den Shield beendet
       res.list.push({i,res:!a.passed?'fail':a.nPay>0?'paid':'pass',trades:a.trades,days:day,daysToFirstPay:fpd,nPay:a.nPay,pay:a.pay,hedge:a.hedge,netNo:a.netNo,netHe:a.netHe,
-        calDays:a.calDays,calToFirstPay:fpd===null?null:cal(fpd),feesPaid:a.feesPaid,slipPaid:a.slipPaid});
+        calDays:a.calDays,calToFirstPay:fpd===null?null:cal(fpd),feesPaid:a.feesPaid,slipPaid:a.slipPaid,shieldBreaches:shB,shieldLost:a.shieldLost});
     }
     res.real=real; res.netNo=cNo; res.netHe=cHe;
     // Mittelwerte je Phase nur über Accounts, die die Phase erreicht haben (sonst null)
     res.days={};
     for(const k of PH){ const s=sum[k]; res.days[k]={n:s.n,tradingDays:s.n?s.tradingDays/s.n:null,winDays:s.n?s.winDays/s.n:null,
       dllStops:s.n?s.dllStops/s.n:null,dllBreaches:s.n?s.dllBreaches/s.n:null,
-      dllSlipBreaches:s.n?s.dllSlipBreaches/s.n:null,ddSlipBreaches:s.n?s.ddSlipBreaches/s.n:null,consBlocks:s.n?s.consBlocks/s.n:null,daysBlocks:s.n?s.daysBlocks/s.n:null,
+      dllSlipBreaches:s.n?s.dllSlipBreaches/s.n:null,ddSlipBreaches:s.n?s.ddSlipBreaches/s.n:null,shieldBreaches:s.n?s.shieldBreaches/s.n:null,consBlocks:s.n?s.consBlocks/s.n:null,daysBlocks:s.n?s.daysBlocks/s.n:null,
       calBlocks:s.n?s.calBlocks/s.n:null}; }
     res.medianDaysToPass=median(toPass);
     // Consistency: Zusatztage vom ersten Blockade-Tag bis zum Bestehen (Step 1 + Step 2), Mittel über bestandene Accounts

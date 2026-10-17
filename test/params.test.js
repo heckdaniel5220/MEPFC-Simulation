@@ -69,7 +69,12 @@ test('4. maxRisk-Deckel', () => {
   const capped = ALL.filter(o => o.maxRisk && Math.max(10, Math.round(o.dd * 0.25 / 5) * 5) > o.maxRisk);
   assert.ok(capped.length > 0);
   for (const o of ALL.filter(o => o.maxRisk)) assert.ok(autoParams(o, STRAT).risk <= o.maxRisk, o.id);
-  for (const o of capped) assert.strictEqual(autoParams(o, STRAT).risk, o.maxRisk, o.id);
+  // M-019: maxRisk = shield, ein voller Stop mit Kosten bleibt darunter (größtes Vielfaches von 5 mit risk + cost < shield)
+  for (const o of capped) {
+    const P = autoParams(o, STRAT), c = r => Math.max(1, Math.round(r * 0.02));
+    let r = Math.floor(o.maxRisk / 5) * 5; while (r + c(r) >= o.shield) r -= 5;
+    assert.strictEqual(P.risk, r, o.id); assert.ok(P.risk + P.cost < o.shield, o.id);
+  }
 });
 
 test('5. DLL-Deckel und notTradable (konstruiertes Angebot)', () => {
@@ -120,8 +125,10 @@ test('Standardwerte ergeben dieselben Kernwerte wie das bisherige applyOffer', (
     const old = { mode: o.mode, fee: o.fee, target: o.mode === 'instant' ? 0 : o.target, target2: o.mode === 'instant' ? 0 : (o.target2 || 0), dd: o.dd, ddStatic: !!o.ddStatic,
       buf: o.buf, minp: o.minp, wfrac: o.wfrac, cap: o.cap, split: o.split, maxp: o.maxp, risk, cost: Math.max(1, Math.round(risk * 0.02)), hfund: false,
       hp: Math.min(30, Math.round(o.fee * 1.25 / o.dd * 200) / 2) };
-    for (const k in old) assert.strictEqual(P[k], old[k], o.id + ' ' + k);
-    assert.ok(!P.riskCapped && !P.notTradable, o.id);
+    // M-019: Angebote, bei denen risk + cost den Shield erreichen würde, werden gedeckelt (eigener Test)
+    const sh = o.shield > 0 && risk + old.cost >= o.shield;
+    for (const k in old) if (!(sh && (k === 'risk' || k === 'cost'))) assert.strictEqual(P[k], old[k], o.id + ' ' + k);
+    assert.ok(!P.notTradable && !!P.riskCapped === sh, o.id);
   }
 });
 
@@ -331,6 +338,52 @@ test('M-017b: af-std-50 fest 10 % (WR 40 %, CRV 1,5, 1 Trade/Tag, Risiko 25 %, n
     assert.strictEqual(R.netNo / 1000, row.net);
     assert.strictEqual(Math.round(row.net * 100) / 100, want);
   }
+});
+
+// ---- M-019: Auto-Risiko unter Guardian Shield bzw. Max Risk, Handrisiko an der Grenze nicht handelbar ----
+test('M-019 Deckel: risk × (1 + Puffer) + cost < shield für BG CFD und AC, Puffer 0/10/50 %, prepare wirft nie', () => {
+  const SH = ALL.filter(o => o.shield > 0);
+  assert.strictEqual(SH.length, 49);
+  let capped = 0;
+  for (const o of ALL) for (const buf of [0, 10, 50]) for (const slip of [{}, { slipMode: 'fixed', slipPct: 10, slipBuffer: buf }, { slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: 2, slipBuffer: buf }]) {
+    const ui = { ...STRAT, ...slipFromUi({ slipMode: 'none', ...slip, slipTailProb: slip.slipTailProb ?? 2 }) };
+    const P = autoParams(o, ui);
+    if (P.notTradable) continue;
+    prepare(P);
+    if (o.shield > 0) {
+      const b = P.slipBuffer > 0 ? P.slipBuffer : 0;
+      assert.ok(P.risk * (1 + b / 100) + P.cost < o.shield, `${o.id} Puffer ${b}`);
+      // größtmögliches Vielfaches von 5 (wie der DLL-Deckel)
+      if (P.riskCapped && /Guardian Shield|Max Risk/.test(P.reason)) { capped++;
+        const r = P.risk + 5, c = Math.max(1, Math.round(r * 0.02)); assert.ok(r * (1 + b / 100) + c >= o.shield, o.id); }
+    }
+  }
+  assert.ok(capped > 0);
+  const bg = autoParams(byId('bg-cfd-instant-100'), STRAT), ac = autoParams(byId('ac-d-50'), STRAT);
+  assert.deepStrictEqual([bg.risk, bg.cost, bg.riskCapped], [975, 20, true]);
+  assert.ok(bg.reason.includes('Guardian Shield (1000 $)'), bg.reason);
+  assert.deepStrictEqual([ac.risk, ac.cost, ac.riskCapped], [485, 10, true]);
+  assert.ok(ac.reason.includes('Max Risk (500 $)'), ac.reason);
+  const bgB = autoParams(byId('bg-cfd-instant-100'), { ...STRAT, ...slipFromUi({ slipMode: 'fixed', slipPct: 10, slipBuffer: 10 }) });
+  assert.strictEqual(bgB.risk, 890); assert.ok(bgB.reason.includes('Risiko mit Puffer 10 % + Kosten'), bgB.reason);
+});
+
+test('M-019 Handrisiko an der Grenze: notTradable mit Grund, knapp darunter handelbar', () => {
+  const bg = byId('bg-cfd-instant-100'), ac = byId('ac-d-50');
+  const P = autoParams(bg, { ...STRAT, autorisk: false, risk: 980, cost: 20 });
+  assert.strictEqual(P.notTradable, true);
+  assert.strictEqual(P.reason, 'Risiko + Kosten (1000 $) erreichen den Guardian Shield (1000 $). Jeder volle Stop wäre ein Bruch.');
+  assert.ok(!autoParams(bg, { ...STRAT, autorisk: false, risk: 979, cost: 20 }).notTradable);
+  const A = autoParams(ac, { ...STRAT, autorisk: false, risk: 495, cost: 5 });
+  assert.strictEqual(A.reason, 'Risiko + Kosten (500 $) erreichen den Max Risk (500 $). Jeder volle Stop wäre ein Bruch.');
+  const B = autoParams(bg, { ...STRAT, autorisk: false, risk: 900, cost: 20, ...slipFromUi({ slipMode: 'fixed', slipPct: 10, slipBuffer: 10 }) });
+  assert.ok(B.notTradable && B.reason.startsWith('Risiko mit Puffer 10 % + Kosten (1010 $)'), B.reason);
+  // ohne Shield unverändert
+  assert.ok(!autoParams(byId('af-std-50'), { ...STRAT, autorisk: false, risk: 600, cost: 12 }).notTradable);
+});
+
+test('M-019 Shield-Felder sind keine UI- oder Steuerfelder', () => {
+  for (const k of ['shield', 'shieldSplit', 'shieldStrikes']) { assert.ok(!UI_KEYS.includes(k) && !CTRL_KEYS.includes(k), k); }
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

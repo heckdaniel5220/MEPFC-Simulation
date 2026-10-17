@@ -1380,4 +1380,111 @@ test('M-010h Lucid Direct: 10 Handelstage je Zyklus, Zyklusziele laut Quelle', (
   }
 });
 
+// ---- Guardian Shield (Blue Guardian CFD) und Max Risk (Alpha Capital), M-019 ----
+// Instant wie bg-cfd-instant-100: risk + cost = 1.000 $ = Shield
+const SH = { mode: 'instant', fee: 405, target: 0, target2: 0, dd: 6000, risk: 980, rr: 1.5, wr: 46, cost: 20, hp: 0,
+  buf: 1000, minp: 500, wfrac: 100, cap: 100000, split: 77.6, maxp: 5, n: 400 };
+const noShield = R => {
+  const c = JSON.parse(JSON.stringify(R));
+  delete c.shieldBreaches; delete c.shieldLost;
+  for (const k in c.days) if (c.days[k]) delete c.days[k].shieldBreaches;
+  for (const l of c.list) { delete l.shieldBreaches; delete l.shieldLost; }
+  for (const a of c.accts) { delete a.shieldLost; for (const k in a.phases) if (a.phases[k]) delete a.phases[k].shieldBreaches; }
+  return JSON.stringify(c);
+};
+
+test('M-019 aus: shield 0 und fehlende Felder sind bit-identisch (PRESETS, Handfall ohne Shield)', () => {
+  for (const k in PRESETS) assert.deepStrictEqual(simulate(prepare({ ...PRESETS[k], n: 300 }), SEED), simulate(prepare({ ...PRESETS[k], n: 300, shield: 0, shieldSplit: 50, shieldStrikes: 2 }), SEED), k);
+  const R = simulate(prepare(SH), SEED);
+  assert.strictEqual(R.shieldBreaches, 0); assert.strictEqual(R.shieldLost, 0);
+  assert.ok(R.list.every(l => l.shieldBreaches === 0 && l.shieldLost === false));
+});
+
+test('M-019 Grenze ≥: risk + cost = shield ist ein Bruch, knapp darüber keiner (bit-gleich)', () => {
+  const A = simulate(prepare(SH), SEED);
+  const B = simulate(prepare({ ...SH, shield: 1000.01 }), SEED);
+  assert.strictEqual(noShield(B), noShield(A)); assert.strictEqual(B.shieldBreaches, 0);
+  const C = simulate(prepare({ ...SH, shield: 1000 }), SEED);
+  assert.ok(C.shieldBreaches > 0 && C.shieldLost > 0);
+  // jeder Funded-Verlust zählt: höchstens 2 Brüche, beim 2. Account verloren
+  for (const l of C.list) { assert.ok(l.shieldBreaches <= 2); assert.strictEqual(l.shieldLost, l.shieldBreaches === 2, 'Account ' + l.i); }
+  assert.strictEqual(C.shieldBreaches, C.list.reduce((s, l) => s + l.shieldBreaches, 0));
+  assert.strictEqual(C.shieldLost, C.list.filter(l => l.shieldLost).length);
+  assert.strictEqual(C.days.funded.shieldBreaches, C.shieldBreaches / C.days.funded.n);
+  for (const a of C.accts) { const losses = a.phases.funded.dayPnl.filter(x => x < 0).length;
+    assert.strictEqual(a.phases.funded.shieldBreaches, Math.min(2, losses)); }
+});
+
+test('M-019 Split: ab dem 1. Bruch shieldSplit für alle folgenden Auszahlungen, Trades bit-gleich', () => {
+  const A = simulate(prepare({ ...SH, n: 300 }), SEED), B = simulate(prepare({ ...SH, n: 300, shield: 1000, shieldStrikes: 99, shieldSplit: 48.5 }), SEED);
+  // gleicher Split wie ohne Bruch: nur die Zähler unterscheiden sich
+  const C = simulate(prepare({ ...SH, n: 300, shield: 1000, shieldStrikes: 99, shieldSplit: 77.6 }), SEED);
+  assert.strictEqual(noShield(C), noShield(A));
+  let before = 0, mixed = 0;
+  for (let i = 0; i < 300; i++) {
+    const a = A.list[i], b = B.list[i];
+    assert.deepStrictEqual([b.trades, b.days, b.nPay, b.daysToFirstPay], [a.trades, a.days, a.nPay, a.daysToFirstPay], 'Account ' + i);
+    assert.ok(b.pay <= a.pay + 1e-9);
+  }
+  for (let i = 0; i < 12; i++) {
+    const fa = A.accts[i].phases.funded, fb = B.accts[i].phases.funded;
+    if (!fa.payDays.length) continue;
+    const firstLoss = fa.firstDay + fa.dayPnl.findIndex(x => x < 0);
+    if (fa.dayPnl.every(x => x >= 0)) { assert.strictEqual(B.accts[i].pay, A.accts[i].pay); continue; }
+    if (firstLoss < fa.payDays[0]) { before++; assert.ok(Math.abs(B.accts[i].pay - A.accts[i].pay * 48.5 / 77.6) < 1e-6, 'Account ' + i); }
+    else if (firstLoss < fa.payDays[fa.payDays.length - 1]) { mixed++; assert.ok(B.accts[i].pay < A.accts[i].pay && B.accts[i].pay > A.accts[i].pay * 48.5 / 77.6, 'Account ' + i); }
+    assert.ok(fb.shieldBreaches > 0);
+  }
+  assert.ok(before > 0 && mixed > 0, `${before} / ${mixed}`);
+});
+
+test('M-019 Max Risk (shieldStrikes 1): 1. Bruch beendet den Account', () => {
+  const R = simulate(prepare({ ...SH, shield: 1000, shieldStrikes: 1 }), SEED);
+  assert.ok(R.shieldLost > 0);
+  for (const l of R.list) { assert.ok(l.shieldBreaches <= 1); assert.strictEqual(l.shieldLost, l.shieldBreaches === 1); }
+  for (const a of R.accts) if (a.phases.funded.dayPnl.some(x => x < 0)) assert.ok(a.shieldLost && a.blown && a.phases.funded.dayPnl[a.phases.funded.dayPnl.length - 1] < 0);
+});
+
+test('M-019 Challenge: Shield wirkt nie, nur im Funded', () => {
+  const C = { ...SH, mode: 'challenge', target: 4500, target2: 0, fee: 259, buf: 1000, minp: 100 };
+  const A = simulate(prepare(C), SEED), B = simulate(prepare({ ...C, shield: 1000, shieldStrikes: 99, shieldSplit: 77.6 }), SEED);
+  assert.strictEqual(noShield(B), noShield(A));
+  assert.strictEqual(B.days.step1.shieldBreaches, 0); assert.ok(B.days.funded.shieldBreaches > 0);
+  for (const a of B.accts) assert.strictEqual(a.phases.step1.shieldBreaches, 0);
+  // 2 Brüche: das 1. Account hat dieselbe Challenge
+  const D = simulate(prepare({ ...C, shield: 1000 }), SEED);
+  assert.deepStrictEqual(D.accts[0].phases.step1, A.accts[0].phases.step1);
+});
+
+test('M-019 Reihenfolge: Drawdown vor Shield, Shield vor DLL', () => {
+  // Ein Verlust bricht den DD: kein Shield-Bruch
+  const R = simulate(prepare({ ...SH, dd: 1000, buf: 0, shield: 1000 }), SEED);
+  assert.strictEqual(R.shieldBreaches, 0); assert.strictEqual(R.shieldLost, 0);
+  // Slippage 10 %: Verlust 1.098 $ bricht Shield und hartes DLL (1.050 $) beim selben Trade
+  const D = { ...SH, dllFunded: 1050, dllType: 'hard', slipMode: 'fixed', slipPct: 10, shield: 1000 };
+  const S1 = simulate(prepare({ ...D, shieldStrikes: 1 }), SEED);
+  assert.ok(S1.shieldLost > 0); assert.strictEqual(S1.days.funded.dllBreaches, 0);
+  const S2 = simulate(prepare(D), SEED);
+  // 1. Verlust: Shield-Bruch 1, danach bricht das DLL den Account; der Shield beendet ihn nie
+  assert.strictEqual(S2.shieldLost, 0); assert.ok(S2.list.every(l => l.shieldBreaches <= 1));
+  assert.strictEqual(S2.days.funded.dllBreaches, S2.shieldBreaches / S2.days.funded.n);
+});
+
+test('M-019 prepare wirft bei ungültigen Shield-Werten', () => {
+  for (const bad of [{ shield: -1 }, { shield: '1000' }, { shield: NaN }, { shieldSplit: -1 }, { shieldSplit: 101 }, { shieldStrikes: 0 }, { shieldStrikes: 1.5 }, { shieldStrikes: '2' }])
+    assert.throws(() => prepare({ ...SH, ...bad }), JSON.stringify(bad));
+  prepare({ ...SH, shield: 1000, shieldSplit: 0, shieldStrikes: 1 });
+});
+
+test('M-019 Angebote: BG CFD und Alpha Capital mit Shield aus vorhandenen rules-Schlüsseln, sonst 0', () => {
+  for (const o of ALL) {
+    const r = o.rules || {}, bg = r.guardianShieldPct > 0, ac = o.id.startsWith('ac-');
+    if (bg) assert.deepStrictEqual([o.shield, o.shieldSplit, o.shieldStrikes], [r.size * r.guardianShieldPct / 100, 48.5, 2], o.id);
+    else if (ac) assert.deepStrictEqual([o.shield, o.shieldStrikes], [r.size * r.maxRiskPct / 100, 1], o.id);
+    else assert.strictEqual(o.shield, 0, o.id);
+    if (bg || ac) { assert.strictEqual(o.shield, o.maxRisk, o.id); assert.ok(o.note.includes(bg ? '14061082' : '15888623') && o.note.includes('Abruf 17.10.2026 (Orchestrator)'), o.id); }
+  }
+  assert.strictEqual(ALL.filter(o => o.shield > 0).length, 49);
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
