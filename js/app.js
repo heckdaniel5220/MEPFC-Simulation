@@ -12,6 +12,8 @@
   const {simulate,prepare}=window.GlitchSim;
   const {autoParams,stratFromUi,slipFromUi,slipFields,SLIP_NUM}=window.GlitchParams;
   const Rank=window.GlitchRank;
+  // Strategie-Beispiele (M-018b): Modell, Klick-Plan und Aktiv-Prüfung in js/strategiesUi.js
+  const GS=window.GlitchStrategies, SU=window.GlitchStrategiesUi, SDEPS={stratFromUi,slipFromUi,autoParams};
   // Strategie-Regler (M-007a): Trades pro Tag, Auto-Risiko in % des Drawdowns, Kosten in % des Risikos
   const EXTRA=['tradesPerDay','riskPct','costPct'];
   let seed = 20261015;
@@ -404,6 +406,7 @@
   const snapKey=s=>JSON.stringify([s.strat,s.hedge,s.n,s.seed]);
   function checkStale(){
     $('rankStale').hidden=!RK.snap || snapKey(RK.snap)===snapKey(snapNow());
+    markStrat();
     riskHint();
     EX.refresh();
   }
@@ -533,11 +536,30 @@
   ['rankN','rankHedge'].forEach(id=>$(id).addEventListener('input',checkStale));
   $('ctl').addEventListener('input',checkStale); $('ctl').addEventListener('change',checkStale);
 
+  // ---- Strategie-Beispiele (M-018b): setzen nur Strategiefelder, Angebot und Firmenregeln bleiben ----
+  $('strat-b').innerHTML=SU.barHtml(SU.barModel(GS.STRATEGIES),null);
+  // Aktiv = das Beispiel würde nichts ändern (abgeleitet, läuft in checkStale nach jeder Änderung)
+  function markStrat(){
+    const has=!!$('offer').value, id=SU.activeId(stratUi(),{hasOffer:has},SDEPS);
+    $('strat-b').querySelectorAll('button[data-sid]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.sid===id?'true':'false'));
+    $('strat-own').hidden=has;
+  }
+  // Mit Angebot wie ein Klick auf eine Ranglisten-Zeile (applyOffer: Angebotswerte und Gegentrade zurück, P gleich der Zeile);
+  // ohne Angebot Risiko und Kosten einmal aus dem Drawdown-Feld
+  function pickStrat(sid){
+    const p=GS.byId(sid); if(!p) return;
+    const has=!!$('offer').value, pl=SU.plan(stratUi(),p,{hasOffer:has},SDEPS);
+    setNum('wr',pl.strat.wr); setNum('rr',pl.strat.rr); applyStrat(pl.strat);
+    if(has) applyOffer($('offer').value,pl.strat); else { setNum('risk',pl.risk); setNum('cost',pl.cost); }
+    setPressed(''); render(); checkStale();
+  }
+  $('strat-b').addEventListener('click',e=>{ const b=e.target.closest('button[data-sid]'); if(b) pickStrat(b.dataset.sid); });
+
   // Erklärungen (M-016b): gewähltes Angebot, Rangliste und Slippage-Kurztext für js/explainUi.js
   const EX=window.GlitchExplainUi.mount({offers:OFFERS,deps:{simulate,prepare,autoParams,rank:Rank},slipTxt,
     selected:()=>$('offer').value?{id:$('offer').value,P0:read(),R:last?last.R:null,seed}:null,
     rank:()=>RK.snap?{rows:RK.rows,filtered:RK.rows?Rank.filterRows(RK.rows,curFilter()):null,seed:RK.snap.seed,tag:RK.snap,running:!!RK.timer,aborted:RK.aborted,
       stale:snapKey(RK.snap)!==snapKey(snapNow())}:null});
 
-  apply(PRESETS.futures); setPressed('p-futures'); render(); riskHint();
+  apply(PRESETS.futures); setPressed('p-futures'); render(); riskHint(); markStrat();
 })();
