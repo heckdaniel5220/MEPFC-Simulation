@@ -10,7 +10,7 @@
   const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const {PRESETS,OFFERS}=window.GlitchData;
   const {simulate,prepare}=window.GlitchSim;
-  const {autoParams,stratFromUi}=window.GlitchParams;
+  const {autoParams,stratFromUi,slipFromUi,slipFields,SLIP_NUM}=window.GlitchParams;
   const Rank=window.GlitchRank;
   // Strategie-Regler (M-007a): Trades pro Tag, Auto-Risiko in % des Drawdowns, Kosten in % des Risikos
   const EXTRA=['tradesPerDay','riskPct','costPct'];
@@ -31,7 +31,30 @@
     const u={mode:$('mode').value,hfund:$('hfund').checked,ddStatic:$('ddstatic').checked,
       tradesPerDay:val('tradesPerDay'),dllCompliant:$('dllCompliant').checked,consCompliant:$('consCompliant').checked,daysCompliant:$('daysCompliant').checked};
     IDS.forEach(k=>u[k]=val(k));
-    return u;
+    // Slippage (M-017b): Felder → P-Schlüssel nur über slipFromUi (aus = keine Schlüssel, Anteil der Ausreißer in %)
+    const f={slipMode:$('slipMode').value}; SLIP_NUM.forEach(k=>f[k]=val(k));
+    return Object.assign(u,slipFromUi(f));
+  }
+  // Slip-Felder setzen (aus P bzw. Strategie; fehlend = aus mit Standardwerten) und Sichtbarkeit anpassen
+  function applySlip(src){
+    const f=slipFields(src);
+    $('slipMode').value=f.slipMode; SLIP_NUM.forEach(k=>setNum(k,f[k]));
+    slipVis();
+  }
+  // Bei „aus“ nur die Auswahl, bei „fest“ Slippage und Puffer, bei „mit Ausreißern“ zusätzlich die Tail-Felder
+  function slipVis(){
+    const m=$('slipMode').value, on=m!=='none';
+    $('w-slipPct').hidden=!on; $('w-slipBuffer').hidden=!on; $('slip-note').hidden=!on;
+    $('w-slipTailPct').hidden=m!=='dist'; $('w-slipTailProb').hidden=m!=='dist';
+  }
+  const pctDe=v=>String(Math.round(v*100)/100).replace('.',',');
+  // Kurztext der Slippage einer Strategie bzw. von P (null bei aus); Anteil der Ausreißer in P als Anteil
+  function slipTxt(o){
+    if(!o.slipMode||o.slipMode==='none') return null;
+    const b=o.slipBuffer>0?`, Puffer ${pctDe(o.slipBuffer)} %`:'';
+    return o.slipMode==='fixed'
+      ? `Slippage am Stop fest ${pctDe(o.slipPct)} % des Risikos${b}`
+      : `Slippage am Stop ${pctDe(o.slipPct)} %, Ausreißer ${pctDe(o.slipTailPct)} % bei ${pctDe(o.slipTailProb*100)} % der Verluste${b}`;
   }
   // UI-Werte plus Steuerfelder des Auto-Risikos (Eingabe für stratFromUi)
   function stratUi(){ return Object.assign(uiVals(),{riskPct:val('riskPct'),costPct:val('costPct'),autorisk:$('autorisk').checked}); }
@@ -41,6 +64,7 @@
     setNum('tradesPerDay',st.tradesPerDay); setNum('riskPct',st.riskPct); setNum('costPct',st.costPct);
     ['dllCompliant','consCompliant','daysCompliant'].forEach(k=>{ $(k).checked=st[k]!==false; });
     $('hfund').checked=!!st.hfund; $('autorisk').checked=st.autorisk!==false;
+    applySlip(st);
   }
   // UI gewinnt; vom gewählten Angebot kommen nur die Felder ohne UI-Element (DLL, Consistency, …). Unvorbereitet.
   function read(){ return autoParams(OFFER_BY[$('offer').value],uiVals()); }
@@ -51,6 +75,8 @@
       if(v>parseFloat(rg.max)) rg.max=v;
       rg.value=v; if(ni) ni.value=v;
     });
+    // Video-Szenarien haben keine Slippage: ihr apply setzt sie auf aus (M-017b)
+    applySlip(pr);
   }
 
 
@@ -107,8 +133,11 @@
     try{ P=prepare(P0); R=simulate(P,seed); }
     catch(e){ return blocked('Simulation nicht möglich: '+e.message); }
     $('err').hidden=true; RES.classList.remove('blocked');
-    const be=1/(1+P.rr), beC=(P.risk+P.cost)/(P.risk*(1+P.rr));
-    $('wr-hint').textContent=`Ohne Edge bei diesem CRV: ${fmt0.format(be*100)} %, mit Kosten ${fmt0.format(beC*100)} %. ${P.p>beC+0.005?'Über Break-even: Edge vorhanden.':P.p<be-0.005?'Unter Break-even: negativer Edge.':'Etwa Break-even: kein Edge.'}`;
+    // Mittlere Slippage je Verlust (M-017b): fest slipPct, mit Ausreißern (1 − q) · slipPct + q · slipTailPct, in $ = s̄/100 × Risiko
+    const slipOn=P.slipMode!=='none';
+    const sBar=P.slipMode==='fixed'?P.slipPct:P.slipMode==='dist'?(1-P.slipTailProb)*P.slipPct+P.slipTailProb*P.slipTailPct:0, s=sBar/100*P.risk;
+    const be=1/(1+P.rr), beC=slipOn?(P.risk+P.cost+s)/(P.risk*(1+P.rr)+s):(P.risk+P.cost)/(P.risk*(1+P.rr));
+    $('wr-hint').textContent=`Ohne Edge bei diesem CRV: ${fmt0.format(be*100)} %, mit Kosten${slipOn?' und Slippage':''} ${fmt0.format(beC*100)} %. ${P.p>beC+0.005?'Über Break-even: Edge vorhanden.':P.p<be-0.005?'Unter Break-even: negativer Edge.':'Etwa Break-even: kein Edge.'}`;
     const calibH = instant ? P.fee/P.dd : P.fee/P.dd;
     $('hp-hint').textContent=`Fee genau zurück = Fee ÷ Drawdown = ${String((calibH*100).toFixed(1)).replace('.',',')} %. Etwas mehr bringt beim Verlieren einen kleinen Gewinn. 0 % = kein Gegentrade.${P.feeMonthly>0?' Monatsabo nicht eingerechnet.':''}`;
 
@@ -167,7 +196,11 @@
       ? `${fmt0.format(R.fail+R.passNo)} von ${fmt0.format(n)} Accounts ohne Auszahlung verloren, ${fmt0.format(R.paid)} mit mindestens einer Auszahlung (insgesamt ${fmt0.format(R.nPayTot)} Auszahlungen).`
       : `${fmt0.format(R.fail)} von ${fmt0.format(n)} Challenges verloren, ${fmt0.format(R.passed)} bestanden. Davon ${fmt0.format(R.paid)} mit mindestens einer Auszahlung, ${fmt0.format(R.passNo)} vorher verloren.`;
 
-    last={R,P,instant};
+    // Slippage gesamt (M-017b): kein eigener Geldfluss, steckt in Bestehen und Auszahlungen
+    $('slipc').hidden=!slipOn;
+    if(slipOn) $('slipc').textContent=`Slippage gesamt: ${usd(R.slipPaid)} auf den Prop-Konten (Ø ${usd(R.slipPaid/n)} je Account). Steckt bereits in Bestehen und Auszahlungen.`;
+
+    last={R,P,instant,slip:slipOn};
     renderList();
   }
 
@@ -176,6 +209,8 @@
   const LS={sort:'i',dir:1,filter:'all',page:0,open:-1};
   let last=null;
   const COLS=[['i','#'],['res','Ergebnis'],['trades','Trades'],['days','Tage gesamt'],['pay','Payouts'],['hedge','Echtgeld'],['netNo','Netto ohne'],['netHe','Netto mit']];
+  // Mit Slippage (M-017b) zusätzlich „Slippage“ vor den Netto-Spalten
+  const colsOf=slip=>slip?COLS.slice(0,6).concat([['slipPaid','Slippage']],COLS.slice(6)):COLS;
   const PHN={step1:'Step 1',step2:'Step 2',funded:'Funded'};
   function filters(instant){
     return instant
@@ -187,21 +222,24 @@
       : x.res==='paid' ? `<span class="pill paid">${x.nPay}× ausgezahlt</span>`
       : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
   }
-  function detail(a){
-    let h='<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th></tr></thead><tbody>';
+  function detail(a,slip){
+    let h=`<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th>${slip?'<th>Slippage-Brüche DLL / DD</th>':''}</tr></thead><tbody>`;
     let pnl='';
     for(const k of ['step1','step2','funded']){
       const ph=a.phases[k]; if(!ph) continue;
-      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td></tr>`;
+      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td>${slip?`<td>${ph.dllSlipBreaches} / ${ph.ddSlipBreaches}</td>`:''}</tr>`;
       const d=ph.dayPnl, more=d.length>40?` … (${fmt0.format(d.length)} Tage)`:'';
       pnl+=`<p><b>${PHN[k]}</b> Tages-P&amp;L: ${d.slice(0,40).map(v=>`<span class="${v>0?'pos':v<0?'neg':''}">${sgn(v)}</span>`).join(' · ')}${more}</p>`;
     }
-    h+=`</tbody></table>${pnl}<p>Echtgeld in der Absicherungsphase ${sgn(a.hedgeEval)}, danach ${sgn(a.hedgeFund)}.</p></div>`;
+    h+=`</tbody></table>${pnl}<p>Echtgeld in der Absicherungsphase ${sgn(a.hedgeEval)}, danach ${sgn(a.hedgeFund)}.</p>`;
+    if(slip) h+=`<p>Slippage auf dem Prop-Konto ${usd(a.slipPaid)}. Slippage-Brüche: Tageslimit bzw. Drawdown wäre ohne die Slippage dieses Trades nicht gerissen. Der DD-Anteil hängt stark am Raster der Verluste (Vielfache von Risiko + Kosten) und ist nur ein Hinweis.</p>`;
+    h+='</div>';
     return h;
   }
   function renderList(){
     if(!last) return;
-    const {R,P,instant}=last, list=R.list;
+    const {R,P,instant,slip}=last, list=R.list, cols=colsOf(slip);
+    if(!cols.some(c=>c[0]===LS.sort)){ LS.sort='i'; LS.dir=1; }
     const cnt={all:list.length,fail:0,pass:0,paid:0}; list.forEach(x=>cnt[x.res]++);
     const fl=filters(instant); if(!fl.some(f=>f[0]===LS.filter)) LS.filter='all';
     $('lfilter').innerHTML=fl.map(([k,l])=>`<button type="button" data-f="${k}" aria-pressed="${LS.filter===k}">${l} <span class="num">${fmt0.format(cnt[k])}</span></button>`).join('');
@@ -210,13 +248,13 @@
     rows.sort((x,y)=>{ const a=k==='res'?RANK[x.res]:x[k], b=k==='res'?RANK[y.res]:y[k]; return (a-b)*d || x.i-y.i; });
     const pages=Math.max(1,Math.ceil(rows.length/PAGE)); if(LS.page>=pages) LS.page=pages-1;
     const from=LS.page*PAGE, vis=rows.slice(from,from+PAGE);
-    let t='<thead><tr>'+COLS.map(([c,l])=>`<th aria-sort="${LS.sort===c?(d>0?'ascending':'descending'):'none'}"><button type="button" class="sort" data-k="${c}">${l}${LS.sort===c?(d>0?' ▲':' ▼'):''}</button></th>`).join('')+'</tr></thead><tbody>';
+    let t='<thead><tr>'+cols.map(([c,l])=>`<th aria-sort="${LS.sort===c?(d>0?'ascending':'descending'):'none'}"><button type="button" class="sort" data-k="${c}">${l}${LS.sort===c?(d>0?' ▲':' ▼'):''}</button></th>`).join('')+'</tr></thead><tbody>';
     for(const x of vis){
       const det=x.i<R.accts.length, open=det&&LS.open===x.i;
-      t+=`<tr${det?` class="clk${open?' open':''}" data-i="${x.i}" tabindex="0" aria-expanded="${open}"`:''}><td>${x.i+1}${det?'<span class="chev" aria-hidden="true"></span>':''}</td><td class="txt">${pill(x,instant)}</td><td>${fmt0.format(x.trades)}</td><td>${fmt0.format(x.days)}</td><td>${x.pay?sgn(x.pay):'–'}</td><td class="${x.hedge>=0?'pos':'neg'}">${P.h?sgn(x.hedge):'–'}</td><td class="${x.netNo>=0?'pos':'neg'}">${sgn(x.netNo)}</td><td class="${x.netHe>=0?'pos':'neg'}">${sgn(x.netHe)}</td></tr>`;
-      if(open) t+=`<tr class="detrow"><td colspan="8">${detail(R.accts[x.i])}</td></tr>`;
+      t+=`<tr${det?` class="clk${open?' open':''}" data-i="${x.i}" tabindex="0" aria-expanded="${open}"`:''}><td>${x.i+1}${det?'<span class="chev" aria-hidden="true"></span>':''}</td><td class="txt">${pill(x,instant)}</td><td>${fmt0.format(x.trades)}</td><td>${fmt0.format(x.days)}</td><td>${x.pay?sgn(x.pay):'–'}</td><td class="${x.hedge>=0?'pos':'neg'}">${P.h?sgn(x.hedge):'–'}</td>${slip?`<td class="${x.slipPaid>0?'neg':''}">${x.slipPaid?sgn(-x.slipPaid):'–'}</td>`:''}<td class="${x.netNo>=0?'pos':'neg'}">${sgn(x.netNo)}</td><td class="${x.netHe>=0?'pos':'neg'}">${sgn(x.netHe)}</td></tr>`;
+      if(open) t+=`<tr class="detrow"><td colspan="${cols.length}">${detail(R.accts[x.i],slip)}</td></tr>`;
     }
-    if(!vis.length) t+='<tr><td colspan="8" class="txt note">Keine Accounts in diesem Filter.</td></tr>';
+    if(!vis.length) t+=`<tr><td colspan="${cols.length}" class="txt note">Keine Accounts in diesem Filter.</td></tr>`;
     $('trace').innerHTML=t+'</tbody>';
     $('lpage').textContent=rows.length?`Accounts ${fmt0.format(from+1)}–${fmt0.format(from+vis.length)} von ${fmt0.format(rows.length)} · Seite ${LS.page+1} von ${pages}`:'0 Accounts';
     $('lprev').disabled=LS.page<=0; $('lnext').disabled=LS.page>=pages-1;
@@ -233,9 +271,9 @@
   $('trace').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]'); if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault(); toggle(tr); const n=$('trace').querySelector(`tr[data-i="${tr.dataset.i}"]`); if(n) n.focus();}});
 
   // Zahlenfelder neben jeden Regler setzen
-  const UNIT={tradesPerDay:'×',riskPct:'%',costPct:'%',fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:''};
+  const UNIT={tradesPerDay:'×',riskPct:'%',costPct:'%',fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:'',slipPct:'%',slipTailPct:'%',slipTailProb:'%',slipBuffer:'%'};
   const PRE={rr:'1 :'};
-  IDS.concat(EXTRA).forEach(k=>{
+  IDS.concat(EXTRA,SLIP_NUM).forEach(k=>{
     const rg=$(k), out=$(k+'-o'); if(!out) return;
     const box=document.createElement('span'); box.className='numbox';
     if(PRE[k]){const p=document.createElement('span');p.className='unit';p.textContent=PRE[k];box.appendChild(p);}
@@ -346,6 +384,7 @@
   });
   $('ctl').addEventListener('input',()=>{setPressed('');schedule();});
   $('mode').addEventListener('change',()=>{setPressed('');render();});
+  $('slipMode').addEventListener('change',slipVis);
   $('calib').addEventListener('click',()=>{const P=read();const v=Math.min(30,Math.round(P.fee*1.25/P.dd*200)/2);$('hp').value=v;$('hp-n').value=v;render();});
   $('reroll').addEventListener('click',()=>{seed=(seed*1103515245+12345)>>>0;render();checkStale();});
 
@@ -369,6 +408,8 @@
     $('rankRiskHint').textContent=$('autorisk').checked
       ? `Risiko je Angebot = ${pctTxt(val('riskPct'))} % des Drawdowns (gedeckelt auf Firmenlimit und Tageslimit), Kosten = ${pctTxt(val('costPct'))} % des Risikos.`
       : `Auto-Risiko ist aus: Alle Angebote rechnen mit ${usd(val('risk'))} Risiko und ${usd(val('cost'))} Kosten pro Trade aus dem Steuerpult. Kleine Konten sind damit oft nicht handelbar.`;
+    const st=slipTxt(uiVals());
+    if(st) $('rankRiskHint').textContent+=` ${st}, für alle Angebote gleich${uiVals().slipBuffer>0?' (der Puffer kann das Risiko je Angebot zusätzlich deckeln)':''}.`;
   }
   function rankRun(){
     if(RK.timer) return;
@@ -465,7 +506,7 @@
     if(!sorted.length) t+=`<tr><td colspan="${cols.length}" class="txt note">Keine Angebote in diesem Filter.</td></tr>`;
     $('rankTbl').innerHTML=t+'</tbody>';
     $('rankWrap').hidden=false;
-    $('rankCount').textContent=`${fmt0.format(sorted.length)} von ${fmt0.format(RK.rows.length)} Angeboten${RK.aborted?` (abgebrochen, ${fmt0.format(ALL_OFFERS-RK.rows.length)} nicht berechnet)`:''}. Seed ${RK.snap.seed}, ${fmt0.format(RK.snap.n)} Accounts je Angebot${hedge?'':', ohne Gegentrade'}.`;
+    $('rankCount').textContent=`${fmt0.format(sorted.length)} von ${fmt0.format(RK.rows.length)} Angeboten${RK.aborted?` (abgebrochen, ${fmt0.format(ALL_OFFERS-RK.rows.length)} nicht berechnet)`:''}. Seed ${RK.snap.seed}${slipTxt(RK.snap.strat)?', '+slipTxt(RK.snap.strat):''}, ${fmt0.format(RK.snap.n)} Accounts je Angebot${hedge?'':', ohne Gegentrade'}.`;
   }
   // Klick: Angebot mit dem Schnappschuss der Berechnung übernehmen (Strategie, n, Gegentrade, Seed), dann zu den Kennzahlen
   function rankPick(id){

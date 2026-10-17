@@ -6,12 +6,16 @@
 
   // Felder mit eigenem Eingabeelement in der Oberfläche. Was hier steht, gewinnt gegen das Angebot.
   const UI_KEYS=['mode','hfund','ddStatic','fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n',
-    'tradesPerDay','dllCompliant','consCompliant','daysCompliant'];
+    'tradesPerDay','dllCompliant','consCompliant','daysCompliant','slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer'];
   // Zahlenfelder mit Regler (Reihenfolge wie in der Oberfläche) und Schalter, die apply(P) schreibt und uiVals() zurückliest
   const NUM_KEYS=['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const FLAG_KEYS=['hfund','ddStatic','dllCompliant','consCompliant','daysCompliant'];
   // Strategie: was applyOffer und die Rangliste aus der Oberfläche an autoParams geben
-  const STRAT_KEYS=['wr','rr','tradesPerDay','dllCompliant','consCompliant','daysCompliant','hfund'];
+  const STRAT_KEYS=['wr','rr','tradesPerDay','dllCompliant','consCompliant','daysCompliant','hfund','slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer'];
+  // Slippage am Stop (M-017b): Schlüssel in P und Standard der Eingabefelder (slipTailProb im Feld in % der Verluste, in P als Anteil)
+  const SLIP_KEYS=['slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer'];
+  const SLIP_NUM=['slipPct','slipTailPct','slipTailProb','slipBuffer'];
+  const SLIP_DEF={slipMode:'none',slipPct:5,slipTailPct:100,slipTailProb:2,slipBuffer:0};
   // Steuerfelder der Oberfläche, die nur die Berechnung lenken und nicht in P landen
   const CTRL_KEYS=['riskPct','costPct','autorisk'];
   // Angebotsfelder, die bewusst auf ein UI-Feld abgebildet werden
@@ -21,6 +25,42 @@
   // Gegentrade wie im Video: Fee zurück + 25 %, höchstens 30 %
   const calibHp=(fee,dd)=>Math.min(30,Math.round(fee*1.25/dd*200)/2);
   const autoCost=(risk,costPct)=>Math.max(1,Math.round(risk*costPct/100));
+
+  /* Slip-Schlüssel auf das Nötige kürzen (P-Ebene): aus (oder fehlend) → keine Schlüssel, fest → ohne Tail-Schlüssel.
+     So beeinflussen Werte in ausgeblendeten Feldern weder P noch den Ranglisten-Schnappschuss. Ändert o. */
+  function cleanSlip(o){
+    const m=o.slipMode;
+    if(m===undefined || m==='none'){ for(const k of SLIP_KEYS) delete o[k]; return o; }
+    if(m==='fixed'){ delete o.slipTailPct; delete o.slipTailProb; }
+    return o;
+  }
+  // Eingabefelder → Slip-Schlüssel in P (einzige Umrechnung % der Verluste → Anteil). f: {slipMode, slipPct, slipTailPct, slipTailProb (%), slipBuffer}
+  function slipFromUi(f){
+    f=f||{};
+    const o={slipMode:f.slipMode||'none'};
+    for(const k of SLIP_NUM) o[k]=k==='slipTailProb'?f[k]/100:f[k];
+    return cleanSlip(o);
+  }
+  // Slip-Schlüssel aus P → Eingabefelder (Anteil × 100, auf 6 Nachkommastellen gerundet); fehlende Werte auf den Standard
+  const r6=x=>Math.round(x*1e6)/1e6;
+  function slipFields(P){
+    P=P||{};
+    const f={slipMode:P.slipMode||'none'};
+    for(const k of SLIP_NUM) f[k]=P[k]===undefined||f.slipMode==='none'?SLIP_DEF[k]:(k==='slipTailProb'?r6(P[k]*100):P[k]);
+    return f;
+  }
+  // Ungültige Slip-Werte als deutsche Meldung statt Kernmeldung (setzt notTradable und reason)
+  function slipCheck(P){
+    if(P.slipMode===undefined || P.notTradable) return P;
+    const bad=SLIP_NUM.filter(k=>P[k]!==undefined && !(typeof P[k]==='number' && Number.isFinite(P[k]) && P[k]>=0));
+    if(bad.length){ P.notTradable=true; P.reason='Slippage am Stop: alle Werte müssen Zahlen ≥ 0 sein.'; }
+    else if(P.slipMode==='dist' && P.slipTailProb>=1){
+      P.notTradable=true;
+      P.reason=`Anteil der Ausreißer (${de(P.slipTailProb*100)} %) muss unter 100 % der Verluste liegen.`;
+    }
+    return P;
+  }
+  const de=x=>String(Math.round(x*100)/100).replace('.',',');
 
   // Kleinstes Tageslimit, das prepare() im Modus prüft (null = kein Limit)
   function dllMin(P){
@@ -34,7 +74,8 @@
   function autoParams(offer, ui){
     ui=ui||{};
     const own={}; for(const k in ui) if(!CTRL_KEYS.includes(k)) own[k]=ui[k];
-    if(!offer) return own;
+    cleanSlip(own);
+    if(!offer) return slipCheck(own);
 
     const instant=offer.mode==='instant';
     const P=Object.assign({},offer,{
@@ -50,19 +91,27 @@
     Object.assign(P,own);
     if(ui.n!==undefined) P.n=ui.n; else delete P.n;
 
+    slipCheck(P);
     const lim=dllMin(P);
-    if(lim!==null && P.risk+P.cost>=lim){
+    // Geplanter Verlust je Trade gegen das Tageslimit; mit Puffer (M-017b) wie prepare(): risk × (1 + slipBuffer/100) + cost
+    const bufP=P.slipBuffer>0?P.slipBuffer:0;
+    const need=(r,c)=>bufP>0 ? r*(1+bufP/100)+c : r+c;
+    if(!P.notTradable && lim!==null && need(P.risk,P.cost)>=lim){
+      const what=bufP>0?`Risiko mit Puffer ${de(bufP)} % + Kosten`:'Risiko + Kosten';
       if(auto){
         const from=P.risk;
         let r=Math.floor(Math.min(from,lim)/5)*5;
-        while(r>=5 && r+autoCost(r,costPct)>=lim) r-=5;
+        while(r>=5 && need(r,autoCost(r,costPct))>=lim) r-=5;
         if(r>=5){
           P.risk=r; P.cost=autoCost(r,costPct); P.riskCapped=true;
-          P.reason=`Risiko auf ${r} $ gedeckelt (statt ${from} $), damit Risiko + Kosten (${r+P.cost} $) unter dem Tageslimit (${lim} $) bleiben.`;
+          P.reason=`Risiko auf ${r} $ gedeckelt (statt ${from} $), damit ${what} (${de(need(r,P.cost))} $) unter dem Tageslimit (${lim} $) bleiben.`;
         } else {
           P.notTradable=true;
-          P.reason=`Auch mit 5 $ Risiko erreichen Risiko + Kosten (${5+autoCost(5,costPct)} $) das Tageslimit (${lim} $). Kein Trade möglich.`;
+          P.reason=`Auch mit 5 $ Risiko erreichen ${what} (${de(need(5,autoCost(5,costPct)))} $) das Tageslimit (${lim} $). Kein Trade möglich.`;
         }
+      } else if(bufP>0){
+        P.notTradable=true;
+        P.reason=`Risiko mit Puffer + Kosten (${de(need(P.risk,P.cost))} $) erreichen das Tageslimit (${lim} $). Puffer oder Risiko senken.`;
       } else {
         P.notTradable=true;
         P.reason=`Risiko + Kosten (${P.risk+P.cost} $) erreichen das Tageslimit (${lim} $). Kein Trade möglich. Risiko senken oder „Risiko & Kosten an Account-Größe anpassen“ einschalten.`;
@@ -88,6 +137,7 @@
     opts=opts||{};
     const s={};
     for(const k of STRAT_KEYS) if(u[k]!==undefined) s[k]=u[k];
+    cleanSlip(s);
     s.n=opts.n!==undefined?opts.n:u.n;
     s.riskPct=u.riskPct??DEF.riskPct; s.costPct=u.costPct??DEF.costPct; s.autorisk=u.autorisk!==false;
     if(!s.autorisk){ s.risk=u.risk; s.cost=u.cost; }
@@ -105,9 +155,10 @@
       if(k==='n'||k==='maxp') x=Math.max(1,Math.round(x));
       u[k]=x;
     }
-    return u;
+    // Slippage: so, wie die Felder sie halten (P → Felder → uiVals)
+    return Object.assign(u,slipFromUi(slipFields(P)));
   }
 
-  const api={autoParams,dllMin,calibHp,stratFromUi,uiFromP,UI_KEYS,CTRL_KEYS,CORE_KEYS,NUM_KEYS,FLAG_KEYS,STRAT_KEYS,DEF};
+  const api={autoParams,dllMin,calibHp,stratFromUi,uiFromP,slipFromUi,slipFields,SLIP_KEYS,SLIP_NUM,SLIP_DEF,UI_KEYS,CTRL_KEYS,CORE_KEYS,NUM_KEYS,FLAG_KEYS,STRAT_KEYS,DEF};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchParams=api;
 })(typeof self!=='undefined'?self:this);
