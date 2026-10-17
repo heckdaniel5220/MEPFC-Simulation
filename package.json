@@ -4,7 +4,7 @@
   "private": true,
   "description": "Monte-Carlo-Simulation von Prop-Firm-Challenges mit und ohne Echtgeld-Gegentrade",
   "scripts": {
-    "test": "node test/sim.test.js && node test/params.test.js && node test/rank.test.js && node test/explain.test.js && node test/strategies.test.js && node test/explainUi.test.js && node test/strategiesUi.test.js",
+    "test": "node test/sim.test.js && node test/params.test.js && node test/rank.test.js && node test/explain.test.js && node test/strategies.test.js && node test/explainUi.test.js && node test/strategiesUi.test.js && node test/notes.test.js",
     "start": "python3 -m http.server 8000"
   }
 }
