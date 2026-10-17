@@ -65,7 +65,7 @@
         }
       } else {
         P.notTradable=true;
-        P.reason=`Risiko + Kosten (${P.risk+P.cost} $) erreichen das Tageslimit (${lim} $). Kein Trade möglich. Risiko senken oder „Risiko & Kosten anpassen“ einschalten.`;
+        P.reason=`Risiko + Kosten (${P.risk+P.cost} $) erreichen das Tageslimit (${lim} $). Kein Trade möglich. Risiko senken oder „Risiko & Kosten an Account-Größe anpassen“ einschalten.`;
       }
     }
     // Gewinntage (M-004): Schwelle, die selbst ein Tag nur mit Gewinn-Trades nicht erreicht, prüft prepare() ebenfalls

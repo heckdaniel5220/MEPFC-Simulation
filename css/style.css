@@ -31,6 +31,10 @@ header h1{font-size:28px;line-height:1.15;margin:0;font-weight:700;letter-spacin
 header p{margin:6px 0 0;color:var(--muted);max-width:70ch}
 .num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
 .presets{display:flex;flex-wrap:wrap;gap:8px}
+.presets-l{flex-basis:100%;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.preset-note{flex-basis:100%;font-size:13px;color:var(--muted);line-height:1.45;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.preset-note[hidden]{display:none}
+.preset-note .btn{font-size:13px;padding:6px 10px}
 .presets button,.btn{font:inherit;font-size:14px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);
   padding:8px 12px;border-radius:999px;cursor:pointer}
 .presets button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
@@ -125,7 +129,12 @@ input:disabled,input[type=number]:disabled{cursor:not-allowed}
 .results.blocked > :not(.errbox){display:none}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap}
 /* Rangliste (M-015b) */
-.jump{text-decoration:none;display:inline-flex;align-items:center}
+.presetbar{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px}
+.presetbar .presets{flex:1 1 520px}
+@media (min-width:621px){.presetbar .jump{order:2}.preset-note{order:3}}
+.jump{font-size:14px;font-weight:600;color:var(--nohedge);text-decoration:underline;text-underline-offset:3px;padding:8px 0;white-space:nowrap}
+.jump:hover{text-decoration-thickness:2px}
+.jump:focus-visible{outline:2px solid var(--nohedge);outline-offset:2px}
 .btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .btn:disabled{opacity:.4;cursor:default}
 .rank{display:flex;flex-direction:column;gap:12px;min-width:0}
