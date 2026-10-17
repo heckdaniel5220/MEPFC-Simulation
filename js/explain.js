@@ -1,7 +1,7 @@
 /* Glitch-Simulator – Regelblatt und Eignungserklärung (M-016a).
    DOM-frei: Browser window.GlitchExplain, Node module.exports.
    ruleSheet und challengeType lesen nur die Daten eines Angebots. ruleCosts rechnet je Regelgruppe einen Lauf mit
-   abgeschalteter Gruppe (simulate, prepare, autoParams und rank werden übergeben: deps). strategyFit und typeSummary
+   abgeschalteter Gruppe (ruleCostsSteps: dasselbe schrittweise, ein simulate je Schritt, M-016b) (simulate, prepare, autoParams und rank werden übergeben: deps). strategyFit und typeSummary
    bauen Sätze nur aus Zahlen der Rangliste (rank.js) und aus ruleCosts. */
 (function(root){
   'use strict';
@@ -331,14 +331,15 @@
   }
   const CONTROL_MAXP=1000;
 
-  // ruleCosts(offer, ui, deps, row?): deps = {simulate, prepare, autoParams, rank}.
+  // ruleCostsSteps(offer, ui, deps, row?): deps = {simulate, prepare, autoParams, rank}. Generator (M-016b): yield nach jedem
+  // simulate-Aufruf, damit die Oberfläche je Lauf ein Häppchen rechnen kann; der Rückgabewert ist das Ergebnis von ruleCosts.
   // row = Rangliste-Zeile mit gleichem ui und Seed: P kommt aus row.P, der Grundlauf wird für die Account-Liste wiederholt und muss row.net treffen.
-  function ruleCosts(offer,ui,deps,row){
+  function* ruleCostsSteps(offer,ui,deps,row){
     ui=ui||{};
     const seed=ui.seed!==undefined?ui.seed:SEED;
     const P=row?row.P:deps.autoParams(offer,stripUi(ui));
     if(P.notTradable || (row && (row.net===null || row.error))) return null;
-    const b=run(offer,P,seed,deps), base=b.row;
+    const b=run(offer,P,seed,deps), base=b.row; yield;
     if(row && base.net!==row.net) throw new Error(`Grundlauf ${offer.id}: Netto ${base.net} ≠ Rangliste ${row.net} (ui oder Seed verschieden)`);
     const conv=maxpConvention(offer), ci95=deps.rank.ci95;
     let bCtl=null;   // Grundlauf mit maxp 1000, nur bei Bedarf
@@ -353,12 +354,13 @@
         c={d,lo:d,hi:d,half:0,state:d!==0?'binds':'same',stateText:STATE[d!==0?'binds':'same'],moneyIdentical:d===0,exact:true,
           dPay:0,payLo:0,payHi:0,payBinds:false,dDays:0,dCalDays:0};
       } else {
-        const a=run(offer,Object.assign({},P,G.off),seed,deps);
+        const a=run(offer,Object.assign({},P,G.off),seed,deps); yield;
         c=compare(b,a,ci95); c.off=G.off;
         // Negatives Δ und maxp nur Konvention: Kontrolllauf mit und ohne Regel, beide mit maxp 1000
         if(c.state==='binds' && c.d<0 && conv){
-          if(!bCtl) bCtl=run(offer,Object.assign({},P,{maxp:CONTROL_MAXP}),seed,deps);
-          const k=compare(bCtl,run(offer,Object.assign({},P,G.off,{maxp:CONTROL_MAXP}),seed,deps),ci95);
+          if(!bCtl){ bCtl=run(offer,Object.assign({},P,{maxp:CONTROL_MAXP}),seed,deps); yield; }
+          const aCtl=run(offer,Object.assign({},P,G.off,{maxp:CONTROL_MAXP}),seed,deps); yield;
+          const k=compare(bCtl,aCtl,ci95);
           c.control={maxp:CONTROL_MAXP,d:k.d,lo:k.lo,hi:k.hi,state:k.state,dPay:k.dPay};
           // kippt das Vorzeichen oder schließt die Spanne 0 ein, folgt das negative Δ aus der Annahme maxp
           c.maxpArtifact=!(k.state==='binds' && k.d<0);
@@ -372,6 +374,12 @@
     return {id:offer.id,seed,n:base.n,maxp:P.maxp,maxpConvention:conv,
       base:{net:base.net,netLo:base.netLo,netHi:base.netHi,payout:base.payout,days:base.days,calDays:base.calDays,feesMean:base.feesMean},
       groups,costliest:pos.length?pos[0].key:null,mostNegative:neg.length?neg[0].key:null,maxpArtifact:art.length?art[0].key:null};
+  }
+  // ruleCosts: Generator in einem Zug leer laufen lassen
+  function ruleCosts(offer,ui,deps,row){
+    const it=ruleCostsSteps(offer,ui,deps,row);
+    let r=it.next(); while(!r.done) r=it.next();
+    return r.value;
   }
 
   // Kosten für alle handelbaren Zeilen einer Rangliste (offers = OFFERS-Gruppen oder flache Liste)
@@ -413,20 +421,30 @@
       ...net,' je Account (Spanne ',N(row.netLo,money(row.netLo),'row.netLo'),' bis ',N(row.netHi,money(row.netHi),'row.netHi'),')',
       c.why==='bottom'?', sicher im unteren Drittel':'',': ',FIT_TEXT[c.fit],'.']);
   }
-  function tradeEV(P){ const p=P.wr/100; return p*P.risk*P.rr-(1-p)*P.risk-P.cost; }
+  // Mittlere Slippage je Verlust-Trade in $ (M-017b E8): fest slipPct, mit Ausreißern (1 − q) · slipPct + q · slipTailPct, je % von risk; aus = 0
+  function slipMean(P){
+    const m=P.slipMode, b=m==='fixed'?P.slipPct:m==='dist'?(1-P.slipTailProb)*P.slipPct+P.slipTailProb*P.slipTailPct:0;
+    return b>0?b/100*P.risk:0;
+  }
+  function tradeEV(P){ const p=P.wr/100; return p*P.risk*P.rr-(1-p)*(P.risk+slipMean(P))-P.cost; }
   function s2(row){
     const P=row.P, E=tradeEV(P), ratio=P.target/P.dd;
     const parts=[(P.target2||0)>0?'Ziel Phase 1 ':'Ziel ',N(P.target,moneyData(P.target),'row.P.target'),' = ',N(ratio,dataNum(ratio),'derived'),' × Drawdown ',N(P.dd,moneyData(P.dd),'row.P.dd')];
     if((P.target2||0)>0) parts.push(', Phase 2 ',N(P.target2,moneyData(P.target2),'row.P.target2'));
-    parts.push('. Bei ',N(P.risk,moneyData(P.risk),'row.P.risk'),' Risiko, CRV ',N(P.rr,dataNum(P.rr),'row.P.rr'),' und ',N(P.cost,moneyData(P.cost),'row.P.cost'),
-      ' Kosten bringt ein Trade im Mittel ',N(E,num(E,E===Math.round(E)?0:2)+' $','derived'));
+    const sm=slipMean(P);
+    parts.push('. Bei ',N(P.risk,moneyData(P.risk),'row.P.risk'),' Risiko, CRV ',N(P.rr,dataNum(P.rr),'row.P.rr'),sm>0?', ':' und ',N(P.cost,moneyData(P.cost),'row.P.cost'),' Kosten');
+    // mit Slippage (M-016b): mittlere Slippage je Verlust-Trade nennen, sie steckt im Erwartungswert
+    if(sm>0) parts.push(' und im Mittel ',N(sm,moneyData(Math.round(sm*100)/100),'derived'),' Slippage je Verlust');
+    parts.push(' bringt ein Trade im Mittel ',N(E,num(E,E===Math.round(E)?0:2)+' $','derived'));
     if(E>0) parts.push(', also rund ',N(Math.ceil(P.target/E),String(Math.ceil(P.target/E)),'derived'),' Trades bis zum Ziel');
     parts.push('; bestanden haben ',N(row.pass,pctOf(row.pass),'row.pass'),' der Accounts.');
     return sentence('target',parts);
   }
   function s3(row){
-    const P=row.P, loss=P.risk+P.cost, k=Math.ceil(P.dd/loss);
-    return sentence('losses',[N(k,String(k),'derived'),k===1?' Verlust-Trade (':' Verlust-Trades in Folge (je ',N(loss,moneyData(loss),'derived'),k===1?') erreicht':') erreichen',' den Drawdown von ',N(P.dd,moneyData(P.dd),'row.P.dd'),'.']);
+    const P=row.P, sm=slipMean(P), loss=P.risk+P.cost+sm, k=Math.ceil(P.dd/loss);
+    // mit Slippage (M-016b): mittlerer Verlust inkl. Slippage
+    const lossS=sm>0?moneyData(Math.round(loss*100)/100):moneyData(loss);
+    return sentence('losses',[N(k,String(k),'derived'),k===1?' Verlust-Trade (':' Verlust-Trades in Folge (je ',sm>0?'im Mittel ':'',N(loss,lossS,'derived'),sm>0?' inkl. Slippage':'',k===1?') erreicht':') erreichen',' den Drawdown von ',N(P.dd,moneyData(P.dd),'row.P.dd'),'.']);
   }
   // Beträge unter 10 $ mit Cent, damit fast gleiche Läufe nicht als „0 $“ erscheinen
   const mny=v=>v!==0 && Math.abs(v)<10?num(v,2)+' $':money(v);
@@ -476,9 +494,10 @@
     if(!costs) return null;
     const i=costs.groups.findIndex(g=>g.key==='dll' && g.state==='same'); if(i<0) return null;
     const P=row.P, L=[]; if(chal(P) && P.dllEval>0) L.push(P.dllEval); if(P.dllFunded>0) L.push(P.dllFunded);
-    const lim=L.length?Math.min(...L):P.dllScaleFunded*P.dllScaleFrom, loss=P.risk+P.cost, tpd=P.tradesPerDay||1;
+    const sm=slipMean(P), lim=L.length?Math.min(...L):P.dllScaleFunded*P.dllScaleFrom, loss=P.risk+P.cost+sm, tpd=P.tradesPerDay||1;
+    // mit Slippage (M-016b): mittlerer Verlust inkl. Slippage
     return sentence('dllSame',['Das Tageslimit von ',N(lim,moneyData(lim),'derived'),' greift bei ',N(tpd,String(tpd),'derived'),tpd===1?' Trade':' Trades',' pro Tag und ',
-      N(loss,moneyData(loss),'derived'),' Verlust je Trade nie (Ergebnis identisch, Drawdown ',N(P.dd,moneyData(P.dd),'row.P.dd'),').']);
+      sm>0?'im Mittel ':'',N(loss,sm>0?moneyData(Math.round(loss*100)/100):moneyData(loss),'derived'),sm>0?' Verlust je Trade inkl. Slippage':' Verlust je Trade',' nie (Ergebnis identisch, Drawdown ',N(P.dd,moneyData(P.dd),'row.P.dd'),').']);
   }
   function s5(costs,row,offer){
     if(!costs) return null;
@@ -585,7 +604,7 @@
     return {n:R.length,medianPer1k:all,types,disclaimer:DISCLAIMER};
   }
 
-  const api={ruleSheet,challengeType,ruleCosts,ruleCostsForRows,strategyFit,typeSummary,
+  const api={ruleSheet,challengeType,ruleCosts,ruleCostsSteps,ruleCostsForRows,slipMean,strategyFit,typeSummary,
     placeOf,classify,splitNote,rawKeyGroups,rowTypeKey,proxyCap,maxpConvention,
     SHEET,REST_KEYS,GROUPS,PROXY_CAPS,TYPE_KEYS,DISCLAIMER,ANALYSIS,STATE};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchExplain=api;

@@ -167,3 +167,47 @@ input:disabled,input[type=number]:disabled{cursor:not-allowed}
 .pill.exp{background:color-mix(in srgb,var(--neg) 15%,transparent);color:var(--neg)}
 @media (max-width:420px){.rank-tbl{font-size:13px} .rank-tbl td{padding:6px 5px}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+/* Erklärungen (M-016b): Panel „Angebot erklärt“ und Typ-Zusammenfassung der Rangliste */
+.explain{display:flex;flex-direction:column;gap:10px;min-width:0}
+.explain h2{margin:0}
+.ex-sec{border-top:1px solid var(--line);padding-top:8px}
+.ex-sec>summary,.types>summary{font-weight:700;cursor:pointer;padding:2px 0}
+.ex-sec>div{margin-top:8px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.ex-sec p,.types p{margin:0}
+.ex-fit{margin:0}
+.ex-reasons{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.ex-more>summary{font-size:13px;color:var(--muted);cursor:pointer;margin-bottom:6px}
+.ex-disc{font-size:13px}
+.ex-costs{min-width:0;width:100%}
+.ex-costs td.txt{white-space:normal;min-width:8em}
+.ex-costs td{vertical-align:top}
+.ex-costs .sub{display:block;font-size:11px;color:var(--muted);font-family:var(--f-body);white-space:normal;max-width:22em;margin-left:auto}
+.ex-costs td.txt .sub{margin-left:0}
+.ex-group{border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.ex-group>summary{cursor:pointer;font-weight:600}
+.ex-head{display:block;font-weight:400;font-size:12px;color:var(--muted)}
+.ex-miss{margin-top:6px}
+.ex-miss>summary{font-size:13px;color:var(--muted);cursor:pointer}
+.ex-sheet{margin:6px 0 0;display:flex;flex-direction:column}
+.ex-row{display:grid;grid-template-columns:minmax(10em,1fr) 2fr;gap:2px 12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:14px}
+.ex-row:last-child{border-bottom:0}
+.ex-row dt{color:var(--muted)}
+.ex-row dd{margin:0;overflow-wrap:anywhere}
+.ex-orig{display:block;font-size:11px;color:var(--muted);font-family:var(--f-num)}
+@media (max-width:420px){.ex-row{grid-template-columns:1fr}}
+.types{background:var(--sunk);border-radius:8px;padding:10px 12px}
+.types>div{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+.ex-types{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.ex-type{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.ex-type h3{margin:0;font-size:15px}
+@media (max-width:420px){.ex-types{grid-template-columns:1fr}}
+@media (max-width:420px){
+  .ex-costs thead{display:none}
+  .ex-costs tr{display:grid;grid-template-columns:1fr auto;border-bottom:1px solid var(--line);padding:6px 0}
+  .ex-costs td{border:0;padding:2px 4px}
+  .ex-costs td:first-child{grid-column:1 / -1;font-weight:600}
+  .ex-costs td:nth-child(2){text-align:left}
+  .ex-costs .sub{margin-left:0;max-width:none}
+}
+/* M-016b: lange URLs in der Angebotsnotiz umbrechen (sonst waagrechtes Scrollen bei 390 px seit M-010h) */
+.offer-note{overflow-wrap:anywhere}

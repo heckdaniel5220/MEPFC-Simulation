@@ -127,6 +127,13 @@
       <div class="verdict" id="verdict"></div>
       <div class="errbox" id="err" role="alert" hidden></div>
 
+      <div class="panel explain" id="explain" hidden>
+        <h2>Angebot erklärt</h2>
+        <details class="ex-sec" open><summary>Eignung für die eingestellte Strategie</summary><div id="ex-fit-b"></div></details>
+        <details class="ex-sec" open><summary>Regelkosten im Modell</summary><div id="ex-cost-b"></div></details>
+        <details class="ex-sec"><summary>Regelblatt</summary><div id="ex-sheet-b"></div></details>
+      </div>
+
       <div class="panel">
         <h2>Kontostand über alle Accounts</h2>
         <div class="chart-wrap"><svg id="chart" viewBox="0 0 760 300" width="100%" role="img" aria-label="Kumuliertes Ergebnis mit und ohne Gegentrade"></svg></div>
@@ -170,6 +177,8 @@
       <label class="check"><input type="checkbox" id="rankHedge" checked> mit Gegentrade (je Angebot kalibriert)</label>
       <div class="btnrow"><button type="button" class="btn primary" id="rankGo">Rangliste berechnen</button><button type="button" class="btn" id="rankStop" hidden>Abbrechen</button></div>
       <span class="note" id="rankProg" aria-live="polite"></span>
+      <div class="btnrow"><button type="button" class="btn" id="costGo" disabled>Regelkosten für alle berechnen</button><button type="button" class="btn" id="costStop" hidden>Abbrechen</button></div>
+      <span class="note" id="costProg" aria-live="polite"></span>
     </div>
     <p class="note" id="rankRiskHint"></p>
     <div class="rank-filter" id="rankFilter" hidden>
@@ -180,6 +189,7 @@
       <div class="ctl"><label for="fSizeMin">Kontogröße von</label><select id="fSizeMin" class="sel"><option value="">–</option></select></div>
       <div class="ctl"><label for="fSizeMax">bis</label><select id="fSizeMax" class="sel"><option value="">–</option></select></div>
     </div>
+    <details class="types" id="typeBox" open hidden><summary>Zusammenfassung je Challenge-Typ</summary><div id="typeBody"></div></details>
     <div class="stale" id="rankStale" role="status" hidden>Strategie oder Seed geändert: Rangliste veraltet, neu berechnen. Ein Klick auf eine Zeile stellt die Werte der Berechnung wieder her.</div>
     <div class="tbl" id="rankWrap" hidden><table id="rankTbl" class="list rank-tbl"></table></div>
     <p class="note" id="rankCount"></p>
@@ -192,6 +202,8 @@
 <script src="js/offers.js"></script>
 <script src="js/params.js"></script>
 <script src="js/rank.js"></script>
+<script src="js/explain.js"></script>
+<script src="js/explainUi.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
