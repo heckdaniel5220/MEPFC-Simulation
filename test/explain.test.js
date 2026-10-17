@@ -432,10 +432,16 @@ test('11 Sätze mit Slippage: Erwartungswert, Verlustserie und Tageslimit mit mi
   assert.ok(d && d.text.includes('im Mittel 560 $ Verlust je Trade inkl. Slippage nie'), d && d.text);
   for (const s of f.reasons.concat(f.more)) checkSentence(s, { row, costs: c, fit: f });
   // Regelkosten rechnen mit der Slippage: ac-d-50 Consistency
+  // M-019: mit Max Risk (500 $) bricht bei fest 10 % jeder Funded-Verlust (485 + 48,5 + 10 $ ≥ 500 $), die Consistency wirkt nicht mehr
   const a = byId('ac-d-50'), ra = rows.find(r => r.id === 'ac-d-50'), ca = ruleCosts(a, ui, deps, ra);
   const g = ca.groups.find(x => x.key === 'cons');
-  assert.strictEqual(Math.round(g.d), -474);
-  assert.strictEqual(g.state, 'binds');
+  assert.strictEqual(Math.round(g.d), 0);
+  assert.strictEqual(g.state, 'same');
+  // ohne Max Risk (shield 0) wie vor M-019
+  const a0 = { ...a, shield: 0 }, r0 = Rank.rankOffers([{ g: gOf('ac-d-50'), items: [a0] }], ui, deps)[0];
+  const g0 = ruleCosts(a0, ui, deps, r0).groups.find(x => x.key === 'cons');
+  assert.strictEqual(Math.round(g0.d), -474);
+  assert.strictEqual(g0.state, 'binds');
 });
 
 test('12 Sätze mit Ausreißer-Slippage: jede Zahl mit Quelle, kein verbotenes Thema (je Anbieter)', () => {
