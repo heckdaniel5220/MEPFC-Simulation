@@ -514,6 +514,27 @@
     if(t.length) o.note+=' '+t.join(' ');
   }
 
+  // ---- Guardian Shield (Blue Guardian CFD) und Max Risk (Alpha Capital), M-019: Kernfelder aus rules ableiten, nur Funded ----
+  // Grenze in $ = Größe × guardianShieldPct bzw. maxRiskPct (dieselben Schlüssel, aus denen maxRisk entsteht).
+  // BG: 1. Bruch Split 50 % × 0,97 (3-%-Gebühr bleibt) für alle folgenden Auszahlungen, 2. Bruch Account verloren. AC: 1. Bruch Account verloren.
+  const SHIELD_SRC={bgInstant:'https://help.blueguardian.com/en/articles/14061082-instant-standard-account-rules',
+    bg2step:'https://help.blueguardian.com/en/articles/14062291-2-step-standard-rules',
+    ac:'https://help.alphacapitalgroup.uk/en/articles/15888623-what-is-the-max-risk-rule-and-how-does-it-work'};
+  for(const gr of OFFERS) for(const o of gr.items){
+    const r=o.rules||{}, bg=r.guardianShieldPct>0, ac=!bg && r.maxRiskPct>0;
+    const pct=bg?r.guardianShieldPct:ac?r.maxRiskPct:0;
+    Object.assign(o,{shield:pct?r.size*pct/100:0,
+      shieldSplit:bg?Math.round(50*o.split/r.splitNominal*100)/100:50,
+      shieldStrikes:ac?1:2});
+    if(bg){
+      const nano=o.id.includes('nano');
+      o.note+=` Guardian Shield im Kern (M-019, Abruf 17.10.2026 (Orchestrator)): ${SHIELD_SRC.bgInstant} „If your PnL on open trades reaches a 1% loss“, schließt „in most cases“ alle offenen Trades aller Symbole, „you may immediately begin trading afterward“, 1. Mal „Profit split reduced to 50%“, 2. Mal „The account is permanently breached“, „does not reset once triggered and the profit split cannot be reinstated“; ${SHIELD_SRC.bg2step} „reaches a 2% loss“, „only applies on 2step Funded Accounts“, Folgen gleich, „permanent and cannot be reversed“${nano?'; Nano: keine Quelle gefunden, konservativ 2 %':''}. Abbildung: Bruch, wenn der Verlust eines Funded-Trades (Risiko + Slippage + Kosten, Kosten konservativ eingerechnet, Quelle nennt sie nicht) ${bgFmt(o.shield)} $ erreicht (≥); der Trade wird voll gebucht, der Handel läuft am selben Tag weiter. 1. Bruch Split ${bgFmt(o.shieldSplit)} % (= 50 % × 0,97) für alle folgenden Auszahlungen, 2. Bruch Account verloren, bisherige Auszahlungen bleiben. Firma: alle offenen Trades zusammen, Kern: eine Position je Trade. Das Auto-Risiko bleibt mit Kosten und Slippage-Puffer unter der Grenze (params.js).`;
+    }
+    if(ac){
+      o.note+=` Max Risk im Kern (M-019, Abruf 17.10.2026 (Orchestrator)): ${SHIELD_SRC.ac} je Asset „in open drawdown“, „assessed based on equity (unrealised losses)“, Folge „your account will be closed“ (keine Vorstufe), 3 % (5k–25k), 2 % (50k–200k), Alpha Direct 1 %, unabhängig von Daily und Max Drawdown. „Applies to Qualified Accounts only“ für Käufe nach dem 21.07.2026; Widerspruch: die Tabelle nennt Direct trotzdem, konservativ gilt die Regel auch für Direct. Abbildung: nur Funded (Direct ab dem 1. Trade, One/Pro im Qualified), Bruch, wenn der Verlust eines Trades (Risiko + Slippage + Kosten) ${bgFmt(o.shield)} $ erreicht (≥), Account sofort verloren. Firma: je Asset, Kern: eine Position je Trade. Das Auto-Risiko bleibt mit Kosten und Slippage-Puffer unter der Grenze (params.js).`;
+    }
+  }
+
   const api={PRESETS,OFFERS};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchData=api;
 })(typeof self!=='undefined'?self:this);
