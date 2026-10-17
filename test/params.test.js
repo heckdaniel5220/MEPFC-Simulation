@@ -125,8 +125,8 @@ test('Standardwerte ergeben dieselben Kernwerte wie das bisherige applyOffer', (
   }
 });
 
-test('Alle 115 Angebote × Risiko 5–100 % werfen nie, außer bei notTradable', () => {
-  assert.strictEqual(ALL.length, 115);
+test('Alle 116 Angebote × Risiko 5–100 % werfen nie, außer bei notTradable', () => {
+  assert.strictEqual(ALL.length, 116);
   let capped = 0;
   for (const o of ALL) for (let rp = 5; rp <= 100; rp++) {
     const P = autoParams(o, { ...STRAT, riskPct: rp });
@@ -297,8 +297,8 @@ test('M-017b (d): Puffer erreicht das Tageslimit → Auto-Risiko gedeckelt, Hand
   assert.strictEqual(rows[0].notTradable, true); assert.strictEqual(rows[0].error, null); assert.ok(/Puffer/.test(rows[0].reason));
 });
 
-test('M-017b (e): Auto-Risiko 60 % mit Puffer 10 % über alle 115 Angebote ohne prepare-Ausnahme', () => {
-  assert.strictEqual(ALL.length, 115);
+test('M-017b (e): Auto-Risiko 60 % mit Puffer 10 % über alle 116 Angebote ohne prepare-Ausnahme', () => {
+  assert.strictEqual(ALL.length, 116);
   let capped = 0, nt = 0;
   for (const buf of [10, 20, 50]) for (const rp of [25, 60, 100]) for (const o of ALL) {
     const P = autoParams(o, { ...STRAT, riskPct: rp, ...slipFromUi({ ...FIX10, slipBuffer: buf }) });
