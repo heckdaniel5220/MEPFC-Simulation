@@ -125,7 +125,7 @@ test('1c Proxy-Caps: feste Liste passt zu den notes, Text „Modell-Proxy: …, 
   const noted = ALL.filter(({ o }) => /Proxy/.test(o.note) && /cap/i.test(o.note.match(/[^.]*Proxy[^.]*/)[0] + o.note)).map(({ o }) => o.id).sort();
   const listed = ALL.filter(({ o }) => proxyCap(o)).map(({ o }) => o.id).sort();
   assert.deepStrictEqual(listed, noted);
-  assert.strictEqual(listed.length, 11);
+  assert.strictEqual(listed.length, 12);
   for (const p of Ex.PROXY_CAPS) assert.ok(ALL.some(({ o }) => o.id.startsWith(p.prefix)), p.prefix);
   for (const id of listed) {
     const o = byId(id), m = proxyCap(o);
@@ -135,7 +135,7 @@ test('1c Proxy-Caps: feste Liste passt zu den notes, Text „Modell-Proxy: …, 
   }
 });
 
-test('2 challengeType: alle 115 ohne „unbekannt“, Zählung je Typ', () => {
+test('2 challengeType: alle 116 ohne „unbekannt“, Zählung je Typ', () => {
   const c = {};
   for (const { o, g } of ALL) {
     const t = challengeType(o, g);
@@ -145,7 +145,7 @@ test('2 challengeType: alle 115 ohne „unbekannt“, Zählung je Typ', () => {
     c[t.key] = (c[t.key] || 0) + 1;
     if (t.type === '2step') { assert.strictEqual(t.market, 'CFD'); assert.strictEqual(t.ddModel, 'statisch'); assert.strictEqual(t.note, 'alle CFD, statischer DD'); }
   }
-  assert.deepStrictEqual(c, { '1-Step · Futures': 53, 'Instant/Direct · Futures': 13, 'Instant/Direct · CFD': 15, '1-Step · CFD': 18, '2-Step · CFD': 16 });
+  assert.deepStrictEqual(c, { '1-Step · Futures': 54, 'Instant/Direct · Futures': 13, 'Instant/Direct · CFD': 15, '1-Step · CFD': 18, '2-Step · CFD': 16 });
   assert.strictEqual(challengeType(byId('fn-flex-50'), gOf('fn-flex-50')).ddSource, 'keine Angabe');
   assert.strictEqual(challengeType(byId('mf-rapid-25'), gOf('mf-rapid-25')).ddSource, 'Eval EOD-trailing, Lock bei Start + 100 $, Funded intraday-trailing, Lock bei Start + 100 $');
   assert.strictEqual(challengeType(byId('ac-pro6-50'), gOf('ac-pro6-50')).ddSource, 'statisch');
@@ -262,8 +262,8 @@ test('4b Kontrolllauf maxp 1000 bei negativem Δ: kippt → Modellannahme, stabi
   assert.strictEqual(Ex.maxpConvention(of), false);
   g = ruleCosts(of, { n: 100 }, deps(0)).groups.find(x => x.key === 'cap');
   assert.strictEqual(g.control, undefined); assert.strictEqual(g.maxpArtifact, undefined);
-  // Daten: maxp-Konvention genau bei Alpha Futures, Lucid Pro/Daily, MFFU Rapid, Alpha Capital, Blue Guardian (13 + 8 + 4 + 19 + 46)
-  assert.strictEqual(ALL.filter(({ o: x }) => Ex.maxpConvention(x)).length, 90);
+  // Daten: maxp-Konvention genau bei Alpha Futures, Lucid Pro/Daily, MFFU Rapid und Rapid EOD, Alpha Capital, Blue Guardian (13 + 8 + 5 + 19 + 46)
+  assert.strictEqual(ALL.filter(({ o: x }) => Ex.maxpConvention(x)).length, 91);
   assert.strictEqual(Ex.maxpConvention(byId('lu-direct-25')), false);
   assert.strictEqual(Ex.maxpConvention(byId('mf-pro-50')), false);
 });
@@ -360,7 +360,7 @@ test('7 typeSummary an Stub-Zeilen', () => {
   assert.ok(typeSummary(rows).types.every(x => x.costliest === null && x.sentences.length === 2));
 });
 
-test('8 Laufzeit: ruleCosts je Angebot unter 0,5 s (n 1000), alle 115 ohne Fehler', () => {
+test('8 Laufzeit: ruleCosts je Angebot unter 0,5 s (n 1000), alle 116 ohne Fehler', () => {
   const ui = { wr: 46, rr: 1.5, n: 1000 };
   const rows = Rank.rankOffers(OFFERS, ui, deps);
   let max = 0, maxId = null, cnt = 0;
@@ -369,11 +369,11 @@ test('8 Laufzeit: ruleCosts je Angebot unter 0,5 s (n 1000), alle 115 ohne Fehle
     if (dt > max) { max = dt; maxId = row.id; }
     if (c) cnt++;
   }
-  assert.strictEqual(cnt, 115);
+  assert.strictEqual(cnt, 116);
   assert.ok(max < 500, `${maxId}: ${max} ms`);
   console.log(`    (langsamstes Angebot ${maxId}: ${max} ms)`);
   const all = ruleCostsForRows(OFFERS, rows, ui, deps);
-  assert.strictEqual(Object.keys(all).length, 115);
+  assert.strictEqual(Object.keys(all).length, 116);
 });
 
 console.log(`${passed} Tests bestanden`);
