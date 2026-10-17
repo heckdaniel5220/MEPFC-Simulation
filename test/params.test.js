@@ -2,7 +2,7 @@
 const assert = require('assert');
 const { prepare, simulate } = require('../js/sim.js');
 const { PRESETS, OFFERS } = require('../js/offers.js');
-const { autoParams, dllMin, stratFromUi, uiFromP, UI_KEYS, CTRL_KEYS, CORE_KEYS } = require('../js/params.js');
+const { autoParams, dllMin, stratFromUi, uiFromP, slipFromUi, slipFields, SLIP_KEYS, UI_KEYS, CTRL_KEYS, CORE_KEYS } = require('../js/params.js');
 const Rank = require('../js/rank.js');
 
 let passed = 0;
@@ -213,6 +213,124 @@ test('M-015b: uiFromP rundet n und maxp wie die Oberfläche und setzt fehlende S
   assert.strictEqual(u.hfund, false); assert.strictEqual(u.ddStatic, false);
   assert.strictEqual(u.dllCompliant, true); assert.strictEqual(u.consCompliant, true); assert.strictEqual(u.daysCompliant, true);
   assert.strictEqual(uiFromP({ daysCompliant: false }).daysCompliant, false);
+});
+
+// ---- M-017b: Slippage in der Oberfläche (Felder → slipFromUi → P, P → slipFields → Felder) ----
+const FIX10 = { slipMode: 'fixed', slipPct: 10, slipTailPct: 100, slipTailProb: 2, slipBuffer: 0 };
+const DIST = (q, extra) => ({ slipMode: 'dist', slipPct: 5, slipTailPct: 100, slipTailProb: q, slipBuffer: 0, ...extra });
+const hasSlip = o => SLIP_KEYS.some(k => k in o);
+
+test('M-017b (a): „aus“ erzeugt keine Slip-Schlüssel (slipFromUi, stratFromUi, autoParams, uiFromP)', () => {
+  const off = slipFromUi({ slipMode: 'none', slipPct: 7, slipTailPct: 50, slipTailProb: 3, slipBuffer: 20 });
+  assert.deepStrictEqual(off, {});
+  const u = { ...UI, ...off };
+  assert.ok(!hasSlip(stratFromUi(u)));
+  // auch ein ungekürztes 'none' mit Werten in ausgeblendeten Feldern bleibt ohne Wirkung
+  const raw = { ...UI, slipMode: 'none', slipPct: 7, slipBuffer: 20 };
+  assert.ok(!hasSlip(stratFromUi(raw)));
+  assert.deepStrictEqual(stratFromUi(raw), stratFromUi(UI));
+  for (const o of ALL) {
+    const P = autoParams(o, stratFromUi(raw));
+    assert.ok(!hasSlip(P), o.id);
+    assert.ok(!hasSlip(autoParams(o, raw)), o.id);
+    assert.ok(!hasSlip(uiFromP(P)), o.id);
+  }
+  for (const k of Object.keys(PRESETS)) assert.ok(!hasSlip(autoParams(null, { ...PRESETS[k], ...off })), k);
+  // fest: ohne Tail-Schlüssel
+  assert.deepStrictEqual(slipFromUi(FIX10), { slipMode: 'fixed', slipPct: 10, slipBuffer: 0 });
+});
+
+test('M-017b (b): Rundreise Felder → P → Felder exakt, Tail-Anteil 7 % und 14,1 %', () => {
+  for (const q of [7, 14.1, 0.5, 2]) {
+    const f = DIST(q, { slipPct: 2.5, slipTailPct: 150, slipBuffer: 3 });
+    const P = autoParams(byId('af-std-50'), { ...STRAT, ...slipFromUi(f) });
+    assert.strictEqual(P.slipTailProb, q / 100);
+    assert.deepStrictEqual(slipFields(P), f, String(q));
+    // zweiter Durchlauf (Klick auf eine Zeile → Felder → uiVals) bleibt gleich
+    const u = uiFromP(P);
+    assert.strictEqual(u.slipTailProb, q / 100);
+    assert.deepStrictEqual(slipFields(autoParams(byId('af-std-50'), u)), f);
+  }
+  const fx = slipFields(autoParams(byId('af-std-50'), { ...STRAT, ...slipFromUi(FIX10) }));
+  assert.deepStrictEqual(fx, FIX10); // Tail-Felder auf Standard
+  assert.deepStrictEqual(slipFields({}), { slipMode: 'none', slipPct: 5, slipTailPct: 100, slipTailProb: 2, slipBuffer: 0 });
+});
+
+test('M-017b (c): Ranglisten-Zeile P = P nach Klick, mit „fest“ und mit Ausreißern', () => {
+  const ids = ['af-zero-25', 'af-std-50', 'lu-direct-50', 'bg-cfd-instant-200', 'ac-pro6-50'];
+  const groups = ALL_GROUPS.map(g => ({ g: g.g, items: g.items.filter(o => ids.includes(o.id)) })).filter(g => g.items.length);
+  const deps = { simulate, prepare, autoParams };
+  for (const f of [FIX10, DIST(7, { slipBuffer: 10 })]) {
+    const strat = stratFromUi({ ...UI, ...slipFromUi(f) }, { n: 200, hedge: true });
+    assert.strictEqual(strat.slipMode, f.slipMode);
+    const rows = Rank.rankOffers(groups, { ...strat, seed: SEED }, deps);
+    for (const r of rows) {
+      assert.ok(!r.error, r.id + ' ' + r.error);
+      if (r.notTradable) continue;
+      const o = byId(r.id), shown = autoParams(o, strat), clicked = autoParams(o, uiFromP(shown));
+      assert.deepStrictEqual(strip(clicked), strip(r.P), r.id);
+      assert.deepStrictEqual(slipFields(clicked), slipFields(strat), r.id);
+      const R = simulate(prepare(clicked), SEED);
+      assert.strictEqual(R.netNo / clicked.n, r.net, r.id + ' net');
+      assert.ok(R.slipPaid > 0, r.id);
+    }
+  }
+});
+
+test('M-017b (d): Puffer erreicht das Tageslimit → Auto-Risiko gedeckelt, Handrisiko notTradable', () => {
+  const o = { id: 'x', n: 'Test', mode: 'challenge', fee: 100, target: 3000, target2: 0, dd: 2000, buf: 100, minp: 500, wfrac: 100, cap: 2000, split: 90, maxp: 5,
+    dllEval: 600, dllFunded: 600, dllType: 'soft', dllScaleFunded: 0, dllScaleFrom: 0 };
+  const slip = slipFromUi({ ...FIX10, slipBuffer: 20 });
+  // ohne Puffer: 500 + 10 < 600, kein Deckel
+  assert.ok(!autoParams(o, { ...STRAT, ...slipFromUi(FIX10) }).riskCapped);
+  const P = autoParams(o, { ...STRAT, ...slip }); // 500 × 1,2 + 10 = 610 ≥ 600
+  assert.strictEqual(P.riskCapped, true); assert.ok(!P.notTradable);
+  assert.strictEqual(P.risk, 490); assert.strictEqual(P.cost, 10); // 490 × 1,2 + 10 = 598
+  assert.ok(/Puffer 20 %.*598 \$.*600 \$/.test(P.reason), P.reason);
+  prepare(P);
+  const hand = autoParams(o, { ...STRAT, ...slip, autorisk: false, risk: 500, cost: 10 });
+  assert.strictEqual(hand.notTradable, true); assert.strictEqual(hand.risk, 500);
+  assert.ok(/Risiko mit Puffer \+ Kosten \(610 \$\) erreichen das Tageslimit \(600 \$\)\. Puffer oder Risiko senken\./.test(hand.reason), hand.reason);
+  assert.throws(() => prepare(hand));
+  // Rangliste: nicht handelbar mit Grund, kein Fehler
+  const rows = Rank.rankOffers([{ g: 'Test', items: [o] }], { ...stratFromUi({ ...UI, ...slip, autorisk: false, risk: 500, cost: 10 }), seed: SEED }, { simulate, prepare, autoParams });
+  assert.strictEqual(rows[0].notTradable, true); assert.strictEqual(rows[0].error, null); assert.ok(/Puffer/.test(rows[0].reason));
+});
+
+test('M-017b (e): Auto-Risiko 60 % mit Puffer 10 % über alle 115 Angebote ohne prepare-Ausnahme', () => {
+  assert.strictEqual(ALL.length, 115);
+  let capped = 0, nt = 0;
+  for (const buf of [10, 20, 50]) for (const rp of [25, 60, 100]) for (const o of ALL) {
+    const P = autoParams(o, { ...STRAT, riskPct: rp, ...slipFromUi({ ...FIX10, slipBuffer: buf }) });
+    if (P.notTradable) { nt++; assert.throws(() => prepare(P), o.id); continue; }
+    if (buf === 10 && rp === 60 && P.riskCapped) capped++;
+    prepare(P);
+  }
+  assert.ok(capped > 0);
+});
+
+test('M-017b (f): Ausreißer-Anteil ≥ 100 % gibt eine deutsche Meldung, keine Kernmeldung', () => {
+  for (const q of [100, 150]) {
+    for (const o of [byId('af-std-50'), null]) {
+      const P = autoParams(o, { ...(o ? STRAT : PRESETS.futures), ...slipFromUi(DIST(q)) });
+      assert.strictEqual(P.notTradable, true);
+      assert.ok(/Anteil der Ausreißer \(1[05]0 %\) muss unter 100 % der Verluste liegen\./.test(P.reason), P.reason);
+      assert.ok(!/slipTailProb/.test(P.reason));
+    }
+  }
+  assert.ok(!autoParams(byId('af-std-50'), { ...STRAT, ...slipFromUi(DIST(99.5)) }).notTradable);
+});
+
+test('M-017b: af-std-50 fest 10 % (WR 40 %, CRV 1,5, 1 Trade/Tag, Risiko 25 %, n 1.000): Rangliste = Hauptsimulation', () => {
+  const o = byId('af-std-50'), groups = [{ g: 'Alpha Futures', items: [o] }], deps = { simulate, prepare, autoParams };
+  const ui = { ...STRAT, n: 1000, daysCompliant: true };
+  for (const [f, want] of [[FIX10, -15.13], [{ slipMode: 'none' }, 63.18]]) {
+    const strat = stratFromUi({ ...ui, ...slipFromUi(f) }, { n: 1000, hedge: true });
+    const row = Rank.rankOffers(groups, { ...strat, seed: SEED }, deps)[0];
+    const R = simulate(prepare(autoParams(o, uiFromP(autoParams(o, strat)))), SEED);
+    assert.strictEqual(R.netNo / 1000, row.net);
+    assert.strictEqual(Math.round(row.net * 100) / 100, want);
+  }
 });
 
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

@@ -75,6 +75,23 @@
         <small class="note" id="rule-hint"></small>
       </fieldset>
 
+      <fieldset id="slip-box">
+        <legend>Slippage am Stop</legend>
+        <div class="ctl">
+          <label for="slipMode">Slippage am Stop-Loss</label>
+          <select id="slipMode" class="sel">
+            <option value="none">aus</option>
+            <option value="fixed">fest</option>
+            <option value="dist">mit Ausreißern</option>
+          </select>
+        </div>
+        <div class="ctl" id="w-slipPct" hidden><div class="row"><label for="slipPct">Slippage in % des Risikos</label><output id="slipPct-o"></output></div><input type="range" id="slipPct" min="0" max="50" step="0.5" value="5"></div>
+        <div class="ctl" id="w-slipTailPct" hidden><div class="row"><label for="slipTailPct">Ausreißer in % des Risikos</label><output id="slipTailPct-o"></output></div><input type="range" id="slipTailPct" min="0" max="300" step="5" value="100"></div>
+        <div class="ctl" id="w-slipTailProb" hidden><div class="row"><label for="slipTailProb">Anteil Ausreißer (in % der Verluste)</label><output id="slipTailProb-o"></output></div><input type="range" id="slipTailProb" min="0" max="20" step="0.5" value="2"></div>
+        <div class="ctl" id="w-slipBuffer" hidden><div class="row"><label for="slipBuffer">Puffer beim Tageslimit (in % des Risikos)</label><output id="slipBuffer-o"></output></div><input type="range" id="slipBuffer" min="0" max="50" step="1" value="0"><small>Regeltreuer Trader: rechnet vor jedem Trade mit Risiko × (1 + Puffer) + Kosten gegen das Tageslimit.</small></div>
+        <small class="note" id="slip-note" hidden>Annahme ohne Quelle. Beispiel: fest 5 % = enger Stop in ruhigem Markt; Ausreißer 2 % × 100 % = Gaps/News. Nur Verlust-Trades rutschen, Gewinne (Take-Profit) nicht.</small>
+      </fieldset>
+
       <fieldset class="hedge-legend">
         <legend>Gegentrade auf Echtgeld-Konto</legend>
         <div class="ctl"><div class="row"><label for="hp">Größe Gegentrade (in % der Prop-Position)</label><output id="hp-o"></output></div><input type="range" id="hp" min="0" max="30" step="0.5"><small id="hp-hint"></small></div>
@@ -129,6 +146,7 @@
           <h2>Wo das Geld hingeht</h2>
           <div class="tbl"><table id="flow"></table></div>
           <p class="note" id="outc"></p>
+          <p class="note" id="slipc" hidden></p>
         </div>
       </div>
 
@@ -146,7 +164,7 @@
 
   <section class="panel rank" id="rank" aria-labelledby="rank-h">
     <h2 id="rank-h">Rangliste: welches Angebot passt zur eingestellten Strategie?</h2>
-    <p class="note">Rechnet alle Angebote mit Trefferquote, CRV, Trades pro Tag, Risiko- und Kosten-%, den Regeltreue-Schaltern und „Gegentrade danach weiterlaufen lassen“ aus dem Steuerpult. Alle Angebote laufen mit demselben Seed wie die Hauptsimulation. Ein Klick auf eine Zeile übernimmt das Angebot mit genau diesen Werten in die Hauptsimulation.</p>
+    <p class="note">Rechnet alle Angebote mit Trefferquote, CRV, Trades pro Tag, Risiko- und Kosten-%, den Regeltreue-Schaltern, der Slippage am Stop und „Gegentrade danach weiterlaufen lassen“ aus dem Steuerpult. Alle Angebote laufen mit demselben Seed wie die Hauptsimulation. Ein Klick auf eine Zeile übernimmt das Angebot mit genau diesen Werten in die Hauptsimulation.</p>
     <div class="rank-ctl">
       <div class="ctl"><label for="rankN">Accounts je Angebot</label><span class="numbox"><input type="number" id="rankN" value="1000" min="10" max="5000" step="10" inputmode="numeric"></span></div>
       <label class="check"><input type="checkbox" id="rankHedge" checked> mit Gegentrade (je Angebot kalibriert)</label>
