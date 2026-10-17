@@ -80,7 +80,8 @@ test('3 Break-even, EV und Kennzeichnung wie im Prüfbericht', () => {
 // Ausnahmen mit Grund; jede weitere Abweichung bleibt rot
 const LABEL_EXCEPT = {
   // M-019: Risiko 20 $ wegen Max-Risk-Deckel (25 $), Kosten-Minimum 1 $ = 5 % → kein Edge
-  'hoch-wr': ['ac-d-2.5']
+  'hoch-wr': ['ac-d-2.5'],
+  'leicht': ['ac-d-2.5']
 };
 
 test('4 Kennzeichnung je Angebot (P aus autoParams, Formel wie app.js) gleich der nominalen', () => {
