@@ -35,6 +35,9 @@ header p{margin:6px 0 0;color:var(--muted);max-width:70ch}
 .preset-note{flex-basis:100%;font-size:13px;color:var(--muted);line-height:1.45;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
 .preset-note[hidden]{display:none}
 .preset-note .btn{font-size:13px;padding:6px 10px}
+.preset-extra{flex-basis:100%;max-width:72ch}
+.preset-extra[hidden]{display:none}
+.preset-extra p{margin:0 0 6px}
 .presets button,.btn{font:inherit;font-size:14px;font-weight:600;border:1px solid var(--line);background:var(--surface);color:var(--ink);
   padding:8px 12px;border-radius:999px;cursor:pointer}
 .presets button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}

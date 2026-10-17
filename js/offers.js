@@ -9,7 +9,17 @@
     coin:   {mode:'challenge',fee:100,target:3000,dd:2000,risk:2000,rr:1.5,wr:40,cost:10,hp:6.5,hfund:false,buf:100,minp:1500,wfrac:50,cap:2000,split:90,maxp:5,n:500},
     edge:   {mode:'challenge',fee:100,target:3000,dd:2000,risk:500,rr:1.5,wr:46,cost:10,hp:6.5,hfund:false,buf:100,minp:1500,wfrac:50,cap:2000,split:90,maxp:5,n:500},
     afstd:  {mode:'challenge',fee:65,target:3000,dd:2000,risk:500,rr:1.5,wr:40,cost:10,hp:4,hfund:false,buf:100,minp:1000,wfrac:100,cap:3000,split:90,maxp:5,n:500},
-    instant:{mode:'instant',fee:97,target:3000,dd:2500,risk:250,rr:1,wr:50,cost:20,hp:5,hfund:false,buf:1500,minp:500,wfrac:100,cap:10000,split:90,maxp:5,n:500}
+    instant:{mode:'instant',fee:97,target:3000,dd:2500,risk:250,rr:1,wr:50,cost:20,hp:5,hfund:false,buf:1500,minp:500,wfrac:100,cap:10000,split:90,maxp:5,n:500},
+    // Whiteboard „Mathematical Edge“ (M-022): Werte vom Board, WR = Break-even 25 ÷ 44; cost und Payout-Felder (wie afstd) angenommen
+    whiteboard:{mode:'challenge',fee:60,target:3000,dd:2000,risk:2000,rr:0.76,wr:56.8,cost:10,hp:3.375,hfund:false,buf:100,minp:1000,wfrac:100,cap:3000,split:90,maxp:5,n:500}
+  };
+  // Hinweise zu Video-Szenarien (M-022), app.js zeigt sie nur an; die Zahlen im Stufentext prüft test/sim.test.js nach
+  const PRESET_NOTES = {
+    whiteboard:[
+      'Kein Edge: Die Trefferquote 56,8 % ist der Break-even für CRV 0,76 (25 ÷ 44, ohne Kosten). Das Plus kommt allein aus der Payout-Struktur: 60 $ Fee gegen etwa ein Drittel Chance (zwei Gewinne vor dem ersten Verlust), dann mehrere Tausend Dollar an Auszahlungen. Der Gegentrade (3,375 % der Prop-Position, nur bis zum Bestehen) ändert den Erwartungswert nicht, er verschiebt nur, wann die Fee bezahlt wird. Alle simulierten Firmen verbieten Gegenpositionen über Konten. Reine Analyse.',
+      'Nicht auf dem Board und deshalb angenommen: Kosten 10 $ pro Trade und die Auszahlungsregeln (wie Alpha Futures Std).',
+      'Mit den Regeln von heute (Alpha Futures Standard 50k), gemessen mit 20.000 Accounts und Seed 20261015: Das Board ergibt etwa +475 $ je Account. Die Eval-Consistency 50 % senkt das auf etwa +338 $. Mit allen Regeln außer dem Daily Loss Guard (inkl. Fee und Auszahlungsregeln des Angebots) sind es etwa +95 $. Mit dem Daily Loss Guard im Funded (1.000 $) ist ein Risiko von 2.000 $ gar nicht erlaubt. Der Knopf rechnet deshalb mit dem Auto-Risiko (Standard 25 % des Drawdowns); ist es aus, meldet die App „Kein Trade möglich“.'
+    ]
   };
 
   // ---- Alle recherchierten Challenge-Angebote (Fee = Preis mit aktuellem Code) ----
@@ -539,6 +549,6 @@
     }
   }
 
-  const api={PRESETS,OFFERS};
+  const api={PRESETS,PRESET_NOTES,OFFERS};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchData=api;
 })(typeof self!=='undefined'?self:this);

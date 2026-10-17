@@ -157,7 +157,7 @@ test('8 Texte: Hinweis wortgleich zu explain.js, keine Empfehlung, Annahme bei S
 });
 
 test('9 Video-PRESETS in offers.js unberührt und ohne Namenskollision', () => {
-  assert.deepStrictEqual(Object.keys(PRESETS), ['futures', 'coin', 'edge', 'afstd', 'instant']);
+  assert.deepStrictEqual(Object.keys(PRESETS), ['futures', 'coin', 'edge', 'afstd', 'instant', 'whiteboard']);
   const snap = JSON.stringify(PRESETS);
   for (const p of STRATEGIES) { applyStrategy(PRESETS.futures, p, deps); assert.ok(!(p.id in PRESETS), p.id); }
   assert.strictEqual(JSON.stringify(PRESETS), snap);

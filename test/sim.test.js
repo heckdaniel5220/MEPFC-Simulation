@@ -1555,4 +1555,69 @@ test('M-021 accountDetail: verfälschte Liste löst den Rückfall aus und liefer
   assert.throws(() => accountDetail(P, SEED, R.list, -1), /Index/);
 });
 
+// ---- M-022: Video-Szenario Whiteboard „Mathematical Edge“ ----
+const { PRESET_NOTES } = require('../js/offers.js');
+const WB = PRESETS.whiteboard;
+const AFSTD50 = OFFERS.flatMap(g => g.items).find(o => o.id === 'af-std-50');
+
+test('M-022 Preset whiteboard: Board-Werte, ohne Regelfelder', () => {
+  assert.deepStrictEqual(WB, { mode: 'challenge', fee: 60, target: 3000, dd: 2000, risk: 2000, rr: 0.76, wr: 56.8, cost: 10, hp: 3.375, hfund: false,
+    buf: 100, minp: 1000, wfrac: 100, cap: 3000, split: 90, maxp: 5, n: 500 });
+  // Gewinn 19 × 80 $ = 1.520 $, Verlust 25 × 80 $ = 2.000 $; WR = Break-even 25 ÷ 44 auf eine Stelle
+  assert.strictEqual(WB.risk * WB.rr, 1520);
+  assert.strictEqual(Math.round(2500 / 44) / 1, 57); assert.strictEqual(Math.round(25 / 44 * 1000) / 10, WB.wr);
+});
+
+test('M-022 Gegentrade spiegelt das Board: +67,50 $ bei Prop-Verlust, −51,30 $ bei Prop-Gewinn (vor h × cost)', () => {
+  const P = prepare({ ...WB, n: 1, target: 1e9, dd: 1e9 });
+  assert.strictEqual(P.h * P.risk, 67.5);
+  assert.ok(Math.abs(P.h * P.risk * P.rr - 51.3) < 1e-9);
+  // 500 Trades (MAXT) ohne Bestehen und ohne Verlust des Accounts: real = L × (67,50 − h·cost) + W × (−51,30 − h·cost)
+  const R = simulate(P, SEED), tr = R.list[0].trades, hc = P.h * P.cost;
+  assert.strictEqual(tr, 500);
+  const W = (R.real - tr * (67.5 - hc)) / (-51.3 - 67.5);
+  assert.ok(Math.abs(W - Math.round(W)) < 1e-6 && W > 0 && W < tr, String(W));
+});
+
+test('M-022 Referenzkennzahlen whiteboard (Seed 20261015, n 2.000 und 500)', () => {
+  const ref = (n, e) => {
+    const R = simulate(prepare({ ...WB, n }), SEED);
+    for (const k of ['netNo', 'passed', 'paid', 'fees', 'pay', 'nPayTot', 'fail', 'passNo']) if (e[k] !== undefined) assert.strictEqual(R[k], e[k], n + ' ' + k);
+    for (const k of ['netHe', 'real', 'realMin']) assert.ok(Math.abs(R[k] - e[k]) < 1e-6, `${n} ${k} ${R[k]}`);
+  };
+  ref(2000, { netNo: 1035285, netHe: 1030718.9625, passed: 661, paid: 376, fees: 120000, pay: 1155285, real: -4566.0375, realMin: -4917.375, nPayTot: 875, fail: 1339, passNo: 285 });
+  ref(500, { netNo: 259890, netHe: 257303.7375, passed: 171, paid: 101, fees: 30000, pay: 289890, real: -2586.2625, realMin: -2819.1375, nPayTot: 220 });
+});
+
+test('M-022 Stufentext: Zahlen nachgerechnet (n 20.000, Seed 20261015)', () => {
+  const n = 20000, txt = PRESET_NOTES.whiteboard.join(' ');
+  const perAcc = P => { const R = simulate(prepare({ ...P, n }), SEED); return R.netNo / n; };
+  const s1 = perAcc(WB), s2 = perAcc({ ...WB, consEval: 50 });
+  const ui = { wr: WB.wr, rr: WB.rr, hp: WB.hp, n, risk: 2000, cost: 10, autorisk: false, tradesPerDay: 1 };
+  const full = autoParams(AFSTD50, ui);
+  assert.ok(full.notTradable && /Tageslimit \(1000 \$\)/.test(full.reason), full.reason);
+  const P3 = autoParams({ ...AFSTD50, dllFunded: 0 }, ui);
+  assert.ok(!P3.notTradable);
+  const s3 = perAcc(P3);
+  const fmt = v => (v > 0 ? '+' : '−') + Math.round(Math.abs(v)).toLocaleString('de-DE') + ' $';
+  for (const v of [s1, s2, s3]) assert.ok(txt.includes('etwa ' + fmt(v)), `${fmt(v)} fehlt im Text`);
+  assert.deepStrictEqual([s1, s2, s3].map(fmt), ['+475 $', '+338 $', '+95 $']);
+  // Knopf: Auto-Risiko 25 % des Drawdowns ist unter dem Daily Loss Guard handelbar
+  const auto = autoParams(AFSTD50, { wr: WB.wr, rr: WB.rr, n, tradesPerDay: 1, riskPct: 25, costPct: 2, autorisk: true });
+  assert.ok(!auto.notTradable); assert.strictEqual(auto.risk, 500);
+  assert.ok(txt.includes('1.000 $') && txt.includes('2.000 $') && txt.includes('25 % des Drawdowns'));
+});
+
+test('M-022 Pflichttext und Wortprüfung: keine Umgehung, keine Ausführungsdetails des Gegentrades', () => {
+  const txt = PRESET_NOTES.whiteboard.join(' ');
+  for (const s of ['Kein Edge', '56,8 %', '25 ÷ 44', '3,375 % der Prop-Position', 'ändert den Erwartungswert nicht', 'verbieten', 'Reine Analyse', 'angenommen: Kosten 10 $'])
+    assert.ok(txt.includes(s), s);
+  const BAD = [/umgeh/i, /vermeid/i, /trick/i, /ausnutz/i, /Lücke/i, /unbemerkt/i, /versteck/i, /\bLots?\b/i, /Vantage/i, /Broker/i, /Punkt/i, /\bTicks?\b/i, /\bPips?\b/i,
+    /\bNQ\b/, /2,7\b/, /\/Punkt/, /Konto eröffnen/i, /Stop setzen/i];
+  for (const re of BAD) assert.ok(!re.test(txt), String(re));
+  // Gegentrade nur als Anteil der Prop-Position
+  assert.strictEqual((txt.match(/3,375/g) || []).length, 1);
+  assert.deepStrictEqual(Object.keys(PRESET_NOTES), ['whiteboard']);
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
