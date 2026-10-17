@@ -16,19 +16,23 @@
     <p>Hunderte Prop-Accounts, Trade für Trade simuliert: einmal ganz normal, einmal mit dem Echtgeld-Gegentrade („Insurance“) aus den Videos. Beide Varianten laufen auf exakt denselben Kursbewegungen, damit nur der Hedge den Unterschied macht.</p>
   </header>
 
-  <div class="presets" role="group" aria-label="Szenario wählen">
+  <div class="presetbar">
+  <div class="presets" role="group" aria-labelledby="presets-l">
+    <span class="presets-l" id="presets-l">Video-Szenarien (vereinfacht, feste Werte):</span>
     <button type="button" id="p-futures" aria-pressed="true">Futures 50k (Whiteboard)</button>
-    <button type="button" id="p-coin" aria-pressed="false">Seine Annahme: ein Münzwurf-Trade</button>
-    <button type="button" id="p-edge" aria-pressed="false">Futures 50k mit echtem Edge</button>
-    <button type="button" id="p-afstd" aria-pressed="false">Alpha Futures Standard 50k (~65 $)</button>
-    <button type="button" id="p-instant" aria-pressed="false">Alpha Capital Direct 50k (97 $)</button>
-    <a class="btn jump" href="#rank">Zur Rangliste ↓</a>
+    <button type="button" id="p-coin" aria-pressed="false">Münzwurf-Trade</button>
+    <button type="button" id="p-edge" aria-pressed="false">Futures 50k mit Edge</button>
+    <button type="button" id="p-afstd" aria-pressed="false">Alpha Futures Std</button>
+    <button type="button" id="p-instant" aria-pressed="false">Instant</button>
+  </div>
+  <div class="preset-note" id="preset-note" role="status"><span>Vereinfachtes Szenario mit festen Werten, nicht die aktuellen Regeln. Echte Regeln: Angebot im Steuerpult wählen.</span> <button type="button" class="btn" id="preset-offer" hidden></button></div>
+  <a class="jump" href="#rank">Zur Rangliste ↓</a>
   </div>
 
   <div class="grid">
     <form class="panel controls" id="ctl" onsubmit="return false">
       <fieldset class="offer-box">
-        <legend>Challenge-Angebot (Stand 15.10.2026)</legend>
+        <legend>Challenge-Angebot (Stand 15./16.10.2026)</legend>
         <div class="ctl">
           <label for="offer">Firma &amp; Plan wählen</label>
           <select id="offer" class="sel"><option value="">– eigene Werte –</option></select>
@@ -36,7 +40,7 @@
         <label class="check"><input type="checkbox" id="autorisk" checked> Risiko &amp; Kosten an Account-Größe anpassen</label>
         <div class="ctl" id="w-riskPct"><div class="row"><label for="riskPct">Risiko in % des Drawdowns</label><output id="riskPct-o"></output></div><input type="range" id="riskPct" min="5" max="100" step="1" value="25"></div>
         <div class="ctl" id="w-costPct"><div class="row"><label for="costPct">Kosten in % des Risikos</label><output id="costPct-o"></output></div><input type="range" id="costPct" min="0" max="20" step="0.5" value="2"></div>
-        <div class="offer-note" id="offer-note">Wähle ein Angebot. Fee, Ziel, Drawdown und Payout-Regeln werden automatisch gesetzt.</div>
+        <div class="offer-note" id="offer-note">Wähle ein Angebot. Fee, Ziel, Drawdown, Payout-Regeln, Tageslimit, Consistency, Tage- und Kalenderregeln werden automatisch gesetzt.</div>
       </fieldset>
       <fieldset>
         <legend>Modell</legend>
@@ -133,10 +137,10 @@
         <div class="lfilter" id="lfilter" role="group" aria-label="Accounts filtern"></div>
         <div class="tbl"><table id="trace" class="list"></table></div>
         <div class="pager"><button type="button" class="btn" id="lprev">‹ Zurück</button><span id="lpage" class="note" aria-live="polite"></span><button type="button" class="btn" id="lnext">Weiter ›</button></div>
-        <p class="note">Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung. Die ersten 12 Accounts (▸) lassen sich aufklappen: Tage je Phase und Tages-P&amp;L. Ein Account mit verlorener Challenge steht mit Gegentrade nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. In der Summe gleicht sich das aus, bis auf die zusätzlichen Spread-Kosten.</p>
+        <p class="note">Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung. Die ersten 12 Accounts (▸) lassen sich aufklappen: Handelstage je Phase und Tages-P&amp;L. „Tage gesamt“ ist die Nummer des letzten Account-Tags (Börsentage Mo–Fr, inklusive Wartetage ohne Trade vor einer Auszahlung). Bei kalibriertem Gegentrade steht ein Account mit verlorener Challenge nahe null, weil das Echtgeld-Konto die Fee zurückholt. Dafür kostet der Gegentrade bei jedem bestandenen Account echtes Geld. Ohne Edge gleicht sich das in der Summe aus, bis auf die zusätzlichen Spread-Kosten; mit Edge kostet der Gegentrade Geld.</p>
       </div>
 
-      <div class="warn" id="warn-model">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft. Daily Loss Limit, Consistency, Gewinntage und Mindesttage der Angebote sind abgebildet, Auszahlungsrhythmen und Slippage nicht. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
+      <div class="warn" id="warn-model">Modell, kein Handelssystem: Die Kurse sind zufällig (Trefferquote und CRV), Drawdown wird pro Trade geprüft. Daily Loss Limit, Consistency, Gewinn- und Mindesttage, Wartezeiten und Rhythmen der Auszahlung (Kalendertage) und Monatsabos der Angebote sind abgebildet. Nicht abgebildet: Slippage, Kontraktlimits, News-Sperren, Resets. Die Positionsgröße ist fest. Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.</div>
     </div>
   </div>
 
@@ -161,7 +165,7 @@
     <div class="stale" id="rankStale" role="status" hidden>Strategie oder Seed geändert: Rangliste veraltet, neu berechnen. Ein Klick auf eine Zeile stellt die Werte der Berechnung wieder her.</div>
     <div class="tbl" id="rankWrap" hidden><table id="rankTbl" class="list rank-tbl"></table></div>
     <p class="note" id="rankCount"></p>
-    <p class="warn">Gilt nur für die eingestellte Strategie. Positive Werte können aus der Payout-Struktur der Firma kommen statt aus einem Trading-Edge. Modell mit Annahmen (CLAUDE.md). Keine Anlageberatung.</p>
+    <p class="warn">Gilt nur für die eingestellte Strategie. Positive Werte können aus der Payout-Struktur der Firma kommen statt aus einem Trading-Edge. Modell mit Annahmen (Notiz je Angebot, Projektdoku CLAUDE.md). Keine Anlageberatung.</p>
     <p class="note">Spanne = 95 % (± 1,96 × Standardfehler über die Accounts). „Gleichauf“ heißt: Die Spanne überlappt mit der von Platz 1 der gefilterten Liste (nur bei Netto und ROI). Überlappung ist ein strenger Maßstab, gleichauf heißt also nicht gleich gut. Gleicher Seed heißt nicht gleiche Kurse: Jedes Angebot braucht andere Trade-Zahlen, die Zufallsfolgen laufen deshalb auseinander. Spaltenkopf anklicken sortiert, noch einmal klicken dreht die Richtung.</p>
   </section>
 </div>

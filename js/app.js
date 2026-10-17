@@ -93,7 +93,7 @@
     if(!(P.consEval>0||P.consFunded>0)) miss.push(['keine Consistency-Regel','Consistency regeltreu']);
     if(!hasDays(P)) miss.push(['keine Tage-Regeln','Tage-Regeln regeltreu']);
     if(!miss.length) return '';
-    return `Dieses Angebot hat ${miss.map(m=>m[0]).join(', ')}: ${miss.length>1?'Schalter':'Schalter'} ${miss.map(m=>`„${m[1]}“`).join(', ')} ohne Wirkung.`;
+    return `Dieses Angebot hat ${miss.map(m=>m[0]).join(', ')}: Schalter ${miss.map(m=>`„${m[1]}“`).join(', ')} ohne Wirkung.`;
   }
   function render(){
     const P0=read(), off=OFFER_BY[$('offer').value];
@@ -110,7 +110,7 @@
     const be=1/(1+P.rr), beC=(P.risk+P.cost)/(P.risk*(1+P.rr));
     $('wr-hint').textContent=`Ohne Edge bei diesem CRV: ${fmt0.format(be*100)} %, mit Kosten ${fmt0.format(beC*100)} %. ${P.p>beC+0.005?'Über Break-even: Edge vorhanden.':P.p<be-0.005?'Unter Break-even: negativer Edge.':'Etwa Break-even: kein Edge.'}`;
     const calibH = instant ? P.fee/P.dd : P.fee/P.dd;
-    $('hp-hint').textContent=`Fee genau zurück = Fee ÷ Drawdown = ${String((calibH*100).toFixed(1)).replace('.',',')} %. Etwas mehr bringt beim Verlieren einen kleinen Gewinn. 0 % = kein Gegentrade.`;
+    $('hp-hint').textContent=`Fee genau zurück = Fee ÷ Drawdown = ${String((calibH*100).toFixed(1)).replace('.',',')} %. Etwas mehr bringt beim Verlieren einen kleinen Gewinn. 0 % = kein Gegentrade.${P.feeMonthly>0?' Monatsabo nicht eingerechnet.':''}`;
 
     const n=P.n;
     $('k-no').textContent=sgn(R.netNo/n); $('k-no').className='val '+(R.netNo>=0?'pos':'neg');
@@ -120,13 +120,16 @@
     $('k-real').textContent=usd(-R.realMin);
     $('k-real-s').textContent=`Echtgeld nötig (größter Rückgang) · Ergebnis ${sgn(R.real)}`;
 
+    // Fee-Text; bei Monatsabo dazu Ø gezahlte Gebühren der verlorenen Challenges (aus R.list.feesPaid, reine Anzeige)
+    const lost=R.list.filter(x=>x.res==='fail');
+    const feeTxt=P.feeMonthly>0&&!instant?`Fee ${usd(P.fee)}/Monat, Ø gezahlt ${usd(lost.length?lost.reduce((a,x)=>a+x.feesPaid,0)/lost.length:P.fee)}`:`Fee ${usd(P.fee)}`;
     const diff=(R.netHe-R.netNo)/n;
     const passRate=instant? R.paid/n : R.passed/n;
     let v;
     if(P.h===0){ v=`Gegentrade ist auf 0 % gestellt. Beide Linien sind identisch.`; }
     else {
       const fA=R.nFail?R.hFail/R.nFail:0, sA=R.nSucc?R.hSucc/R.nSucc:0;
-      v=`<b>Refinanzierung:</b> Jede ${instant?'vor der ersten Auszahlung verlorene Runde':'verlorene Challenge'} bringt auf dem Echtgeld-Konto im Schnitt ${sgn(fA)} (Fee ${usd(P.fee)}). Dafür kostet jede ${instant?'Runde mit Auszahlung':'bestandene Challenge'} im Schnitt ${sgn(sA)}. `;
+      v=`<b>Refinanzierung:</b> Jede ${instant?'vor der ersten Auszahlung verlorene Runde':'verlorene Challenge'} bringt auf dem Echtgeld-Konto im Schnitt ${sgn(fA)} (${feeTxt}). Dafür kostet jede ${instant?'Runde mit Auszahlung':'bestandene Challenge'} im Schnitt ${sgn(sA)}. `;
       v+=`<b>Unterm Strich verändert der Gegentrade das Ergebnis um ${sgn(diff)} pro Account</b> (${sgn(R.netHe-R.netNo)} gesamt). `;
       if(P.p>beC+0.005) v+=`Weil hier ein echter Edge drin ist, gewinnt der Prop-Account öfter, und genau dann verliert das Echtgeld-Konto. Der Hedge kostet also Geld.`;
       else if(P.p<be-0.005) v+=`Hier ist der Edge negativ. Der Gegentrade gewinnt nur, weil er die Gegenseite eines Verlust-Systems handelt. Dafür bräuchtest du die Prop-Firma nicht.`;
@@ -141,7 +144,7 @@
     const mine = 0.5*won-0.5*P.fee;
     const avgPayPassed = (instant? (R.paid? R.pay/R.paid:0) : (R.passed? R.pay/R.passed:0));
     $('calc').innerHTML=`
-      <div class="line"><span>Whiteboard aus dem Video (fest): 50 % × 2.000 $ − 50 % × 100 $</span><span class="pos">+950 $</span></div>
+      <div class="line"><span>Whiteboard aus dem Video (fest, Zahlen aus dem Video): 50 % × 2.000 $ − 50 % × 100 $</span><span class="pos">+950 $</span></div>
       <div class="line"><span>Dieselbe Formel für ${off?`<b>${off.firm} ${off.n}</b>`:'die eigenen Werte'}: 50 % × ${usd(won)} ${instant?'Auszahlungswert':'Ziel'} − 50 % × ${usd(P.fee)} Fee</span><span class="${mine>=0?'pos':'neg'}">${sgn(mine)}</span></div>
       <div class="line"><span>${instant?'Payout-Quote':'Pass-Quote'} in der Simulation (statt 50 %)</span><span>${pct(passRate)}</span></div>
       <div class="line"><span>Ø Auszahlung pro ${instant?'Account mit Payout':'bestandenem Account'} (statt 2.000 $)</span><span>${usd(avgPayPassed)}</span></div>
@@ -153,9 +156,9 @@
     $('flow').innerHTML=`
       <thead><tr><th><span class="sr">Posten</span></th><th>Ohne</th><th>Mit Gegentrade</th></tr></thead>
       <tbody>
-        <tr><td class="txt">Fees</td><td class="neg">${sgn(-R.fees)}</td><td class="neg">${sgn(-R.fees)}</td></tr>
+        <tr><td class="txt">${P.feeMonthly>0?'Gebühren (inkl. Monatsabo)':'Fees'}</td><td class="neg">${sgn(-R.fees)}</td><td class="neg">${sgn(-R.fees)}</td></tr>
         <tr><td class="txt">Payouts (nach Split)</td><td class="pos">${sgn(R.pay)}</td><td class="pos">${sgn(R.pay)}</td></tr>
-        <tr><td class="txt">Echtgeld bei ${instant?'vor 1. Auszahlung verlorenen':'verlorenen Challenges'} (${fmt0.format(R.nFail)}×)<br><span class="note">Ø ${sgn(R.nFail?R.hFail/R.nFail:0)} pro Account, Fee ${usd(P.fee)}</span></td><td>0 $</td><td class="${R.hFail>=0?'pos':'neg'}">${sgn(R.hFail)}</td></tr>
+        <tr><td class="txt">Echtgeld bei ${instant?'vor 1. Auszahlung verlorenen':'verlorenen Challenges'} (${fmt0.format(R.nFail)}×)<br><span class="note">Ø ${sgn(R.nFail?R.hFail/R.nFail:0)} pro Account, ${feeTxt}</span></td><td>0 $</td><td class="${R.hFail>=0?'pos':'neg'}">${sgn(R.hFail)}</td></tr>
         <tr><td class="txt">Echtgeld bei ${instant?'Accounts mit 1. Auszahlung':'bestandenen Challenges'} (${fmt0.format(R.nSucc)}×)<br><span class="note">Ø ${sgn(R.nSucc?R.hSucc/R.nSucc:0)} pro Account</span></td><td>0 $</td><td class="${R.hSucc>=0?'pos':'neg'}">${sgn(R.hSucc)}</td></tr>
         ${P.hfund?`<tr><td class="txt">Echtgeld nach Bestehen</td><td>0 $</td><td class="${R.hAfter>=0?'pos':'neg'}">${sgn(R.hAfter)}</td></tr>`:''}
         <tr><td class="txt"><b>Netto</b></td><td class="${R.netNo>=0?'pos':'neg'}"><b>${sgn(R.netNo)}</b></td><td class="${R.netHe>=0?'pos':'neg'}"><b>${sgn(R.netHe)}</b></td></tr>
@@ -172,7 +175,7 @@
   const PAGE=50, RANK={fail:0,pass:1,paid:2};
   const LS={sort:'i',dir:1,filter:'all',page:0,open:-1};
   let last=null;
-  const COLS=[['i','#'],['res','Ergebnis'],['trades','Trades'],['days','Tage'],['pay','Payouts'],['hedge','Echtgeld'],['netNo','Netto ohne'],['netHe','Netto mit']];
+  const COLS=[['i','#'],['res','Ergebnis'],['trades','Trades'],['days','Tage gesamt'],['pay','Payouts'],['hedge','Echtgeld'],['netNo','Netto ohne'],['netHe','Netto mit']];
   const PHN={step1:'Step 1',step2:'Step 2',funded:'Funded'};
   function filters(instant){
     return instant
@@ -185,7 +188,7 @@
       : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
   }
   function detail(a){
-    let h='<div class="det"><table><thead><tr><th>Phase</th><th>Tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th></tr></thead><tbody>';
+    let h='<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th></tr></thead><tbody>';
     let pnl='';
     for(const k of ['step1','step2','funded']){
       const ph=a.phases[k]; if(!ph) continue;
@@ -255,7 +258,7 @@
   (function fill(){
     const sel=$('offer');
     OFFERS.forEach(gr=>{const og=document.createElement('optgroup');og.label=gr.g;
-      gr.items.forEach(o=>{OFFER_BY[o.id]=Object.assign({firm:gr.g.split(' · ')[0]},o);const op=document.createElement('option');op.value=o.id;op.textContent=`${o.n} · ${fmt0.format(o.fee)} $`;og.appendChild(op);});
+      gr.items.forEach(o=>{OFFER_BY[o.id]=Object.assign({firm:gr.g.split(' · ')[0]},o);const op=document.createElement('option');op.value=o.id;op.textContent=`${o.n} · ${fmt0.format(o.fee)} $${o.feeMonthly>0?'/Monat':''}`;og.appendChild(op);});
       sel.appendChild(og);});
   })();
   const pctTxt=v=>String(Math.round(v*100)/100).replace('.',',');
@@ -267,13 +270,14 @@
       if(ch&&!(o.dllEval>0)) parts.push('in der Challenge keins'); if(!(o.dllFunded>0)) parts.push('im Funded keins');
       const sc=o.dllScaleFunded>0?`, ab ${usd(o.dllScaleFrom)} Gewinn mind. ${pctTxt(o.dllScaleFunded*100)} % des höchsten Tagesend-Gewinns`:'';
       t.push(`Tageslimit ${parts.join(', ')}${sc} (${o.dllType==='hard'?'hart: Bruch beendet Challenge bzw. Account':'weich: Tag endet'})`);
-    } else t.push('kein Tageslimit');
+    } else t.push('Kein Tageslimit');
     if(o.consEval>0||o.consFunded>0){
       const parts=[]; if(ch&&o.consEval>0) parts.push(`Challenge ${pctTxt(o.consEval)} %`);
       if(o.consFunded>0) parts.push(`Funded ${pctTxt(o.consFunded)} % ${o.consFundedMode==='perpetual'?'über alle Funded-Tage':'je Auszahlungszyklus'}`);
       t.push(`Consistency (bester Tag < Anteil am Gewinn) ${parts.join(', ')}`);
-    } else t.push('keine Consistency-Regel');
+    } else t.push('Keine Consistency-Regel');
     t.push(daysTxt(o));
+    t.push(calTxt(o));
     return t.join('. ')+'.';
   }
   // Tage-Regeln (M-004): Mindest-Handelstage und Gewinntage mit Schwelle, Challenge je Step, Funded je Auszahlungszyklus
@@ -286,11 +290,22 @@
     }
     if(o.payMinDays>0) pay.push(`mind. ${o.payMinDays} Handelstag${o.payMinDays>1?'e':''}`);
     if(o.payWinDays>0) pay.push(win(o.payWinDays,o.payWinDayMin));
-    if(!ev.length&&!pay.length) return 'keine Tage-Regeln';
+    if(!ev.length&&!pay.length) return 'Keine Tage-Regeln';
     const parts=[];
     if(ev.length) parts.push(`Challenge ${ev.join(' und ')}${o.target2>0?' je Step':''}`);
     if(pay.length) parts.push(`Funded ${pay.join(' und ')} je Auszahlungszyklus`);
     return 'Tage-Regeln: '+parts.join(', ');
+  }
+  // Kalender und Monatsabo (M-005): Wartezeit bis zur 1. Auszahlung, Rhythmus, Abo der Challenge
+  function calTxt(o){
+    const kt=n=>`${n} Kalendertag${n>1?'e':''}`;
+    const t=[];
+    if(o.payFirstAfterCal>0) t.push(`1. Auszahlung frühestens ${kt(o.payFirstAfterCal)} nach dem 1. Funded-Trade`);
+    if(o.payEveryCal>0) t.push(`${o.payFirstAfterCal>0?'danach ':'Auszahlung '}alle ${kt(o.payEveryCal)}`);
+    let s=t.length?t.join(', '):'Keine Wartezeit für Auszahlungen';
+    if(o.feeMonthly>0&&o.mode==='challenge') s+=`. Monatsabo: je weitere angefangene 30 Kalendertage der Challenge ${usd(o.feeMonthly)}`;
+    if(o.feeActivation>0) s+=`. Aktivierungsgebühr ${usd(o.feeActivation)}`;
+    return s;
   }
   // strat: Strategie aus stratFromUi (Standard: aktuelle Oberfläche); die Rangliste übergibt ihren Schnappschuss
   function applyOffer(id,strat){
@@ -312,9 +327,22 @@
   ['riskPct','costPct'].forEach(k=>[k,k+'-n'].forEach(id=>$(id).addEventListener('input',()=>{if($('offer').value&&$('autorisk').checked) applyOffer($('offer').value);})));
 
   let tm; const schedule=()=>{clearTimeout(tm);tm=setTimeout(render,60);};
-  const setPressed=id=>document.querySelectorAll('.presets button').forEach(b=>b.setAttribute('aria-pressed',b.id===id?'true':'false'));
-  [['p-futures','futures'],['p-coin','coin'],['p-edge','edge'],['p-instant','instant'],['p-afstd','afstd']].forEach(([id,k])=>{
+  // Presets = Video-Szenarien mit festen Werten (M-013): Hinweis, solange eines gedrückt ist, bei zwei ein Knopf zum echten Angebot
+  const PRESET_KEYS=[['p-futures','futures'],['p-coin','coin'],['p-edge','edge'],['p-instant','instant'],['p-afstd','afstd']];
+  const PRESET_OFFER={afstd:'af-std-50',instant:'ac-d-50'};
+  const setPressed=id=>{
+    document.querySelectorAll('.presets button').forEach(b=>b.setAttribute('aria-pressed',b.id===id?'true':'false'));
+    const k=(PRESET_KEYS.find(p=>p[0]===id)||[])[1], o=k&&OFFER_BY[PRESET_OFFER[k]], b=$('preset-offer');
+    $('preset-note').hidden=!k;
+    b.hidden=!o;
+    if(o){ b.dataset.id=o.id; b.textContent=`Echtes Angebot wählen: ${o.firm} ${o.n}`; }
+  };
+  PRESET_KEYS.forEach(([id,k])=>{
     $(id).addEventListener('click',()=>{apply(PRESETS[k]);setPressed(id);$('offer').value='';applyOffer('');render();checkStale();});
+  });
+  $('preset-offer').addEventListener('click',e=>{
+    const id=e.currentTarget.dataset.id; if(!OFFER_BY[id]) return;
+    $('offer').value=id; applyOffer(id); setPressed(''); render(); checkStale();
   });
   $('ctl').addEventListener('input',()=>{setPressed('');schedule();});
   $('mode').addEventListener('change',()=>{setPressed('');render();});
@@ -383,7 +411,7 @@
   // Spalten; k = Sortierschlüssel (Tage: calDays, sobald rank.js das Feld liefert)
   function rankCols(hasCal,hedge){
     return [['#','Platz'],['firm','Firma'],['offer','Angebot'],['fee','Fee'],['k:net','Netto/Account ± 95 %'],['k:roi','ROI'],['k:netPer1k','Netto je 1.000 $ DD'],
-      ['pass','Pass'],['k:payout','Payout'],['k:'+(hasCal?'calDays':'days'),'Ø Tage bis 1. Auszahlung'],...(hedge?[['q5','Schlechteste 5 % (Netto inkl. Gegentrade)']]:[]),['marks','Markierungen']];
+      ['pass','Pass'],['k:payout','Payout'],['k:'+(hasCal?'calDays':'days'),hasCal?'Ø Kalendertage bis 1. Auszahlung':'Ø Tage bis 1. Auszahlung'],...(hedge?[['q5','Schlechteste 5 % (Netto inkl. Gegentrade)']]:[]),['marks','Markierungen']];
   }
   function marks(r){
     const m=[];
@@ -459,5 +487,5 @@
   ['rankN','rankHedge'].forEach(id=>$(id).addEventListener('input',checkStale));
   $('ctl').addEventListener('input',checkStale); $('ctl').addEventListener('change',checkStale);
 
-  apply(PRESETS.futures); render(); riskHint();
+  apply(PRESETS.futures); setPressed('p-futures'); render(); riskHint();
 })();

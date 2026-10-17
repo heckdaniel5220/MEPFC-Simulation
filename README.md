@@ -1,6 +1,6 @@
 # Glitch-Simulator
 
-Simuliert hunderte Prop-Firm-Accounts Trade für Trade, einmal normal und einmal mit Echtgeld-Gegentrade bis zum Bestehen der Challenge. Enthält 31 Challenge-Angebote von Alpha Futures, Lucid, MyFundedFutures, FundedNext Futures und Alpha Capital (Stand 15.10.2026).
+Simuliert hunderte Prop-Firm-Accounts Trade für Trade, einmal normal und einmal mit Echtgeld-Gegentrade bis zum Bestehen der Challenge (bei Instant bis zur 1. Auszahlung). Enthält 115 Angebote von Alpha Futures, Lucid, MyFundedFutures, FundedNext Futures, Alpha Capital und Blue Guardian (Stand 15./16.10.2026), dazu eine Rangliste.
 
 ## Starten
 - `index.html` im Browser öffnen, oder
