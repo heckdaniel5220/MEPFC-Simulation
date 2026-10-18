@@ -140,13 +140,13 @@
       {label:'Split ab dem 1. Bruch',core:'shieldSplit',raw:[],unit:'%',activeIf:o=>o.shield>0 && o.shieldStrikes>1},
       {label:'Brüche bis Account verloren',core:'shieldStrikes',raw:[],unit:'Anzahl',activeIf:o=>o.shield>0},
       {label:'Guardian Shield Nano laut Quelle',raw:['guardianShieldNano'],unit:'Text'},
-      {label:'Max. Mini / Micro (nicht im Modell)',raw:['maxMini','maxMicro'],unit:'Kontrakte',multi:true},
+      {label:'Max. Mini / Micro (im Modell bei gewähltem Instrument)',raw:['maxMini','maxMicro'],unit:'Kontrakte',multi:true},
       {label:'Lot-Limit (nicht im Modell)',raw:['lotLimit'],unit:'Lots'},
       {label:'Hebel (nicht im Modell)',raw:['leverage'],unit:'Text'},
       {label:'News im Funded (nicht im Modell)',raw:['newsFunded'],unit:'Text'},
       {label:'Wochenende halten im Funded (nicht im Modell)',raw:['weekendFunded'],unit:'Ja/Nein'},
       {label:'EAs (nicht im Modell)',raw:['eas'],unit:'Ja/Nein'},
-      {label:'Scaling-Plan (nicht im Modell)',raw:['scaling'],unit:'Ja/Nein'}]},
+      {label:'Scaling-Plan (Stufen nicht abgebildet)',raw:['scaling'],unit:'Ja/Nein'}]},
     {key:'quelle',label:'Quelle und Stand',items:[
       {label:'Quelle',core:'src',raw:[],unit:'URL'},
       {label:'Stand',core:'asof',raw:[],unit:'Datum',fmt:deDate}]}

@@ -143,4 +143,26 @@ test('5 Texte: DISCLAIMER wortgleich, note, Erklärsätze, keine verbotenen Wör
   assert.strictEqual((U.barHtml(U.barModel(), null).match(/aria-pressed="true"/g) || []).length, 0);
 });
 
+
+test('M-023 Presets lassen das Instrument unverändert, activeId erkennt sie mit Instrument', () => {
+  for (const ins of [{ instrument: 'NQ', stopPts: 25 }, { instrument: 'MES', stopPts: 8 }]) for (const has of [true, false]) {
+    const u0 = Object.assign(has ? uiOfP(Params.autoParams(byId('af-std-50'), Params.stratFromUi(uiVideo()))) : uiVideo(), ins);
+    for (const p of S.STRATEGIES) {
+      const pl = U.plan(u0, p, { hasOffer: has }, deps);
+      assert.strictEqual(pl.strat.instrument, ins.instrument, p.id); assert.strictEqual(pl.strat.stopPts, ins.stopPts, p.id);
+      // UI nach dem Klick: Strategie geschrieben, Instrument wie vorher
+      const u = Object.assign({}, u0, { wr: pl.strat.wr, rr: pl.strat.rr, riskPct: pl.strat.riskPct, costPct: pl.strat.costPct, tradesPerDay: pl.strat.tradesPerDay,
+        autorisk: true }, Params.slipFromUi(Params.slipFields(pl.strat)));
+      for (const k of Params.SLIP_KEYS) if (!(k in pl.strat)) delete u[k];
+      if (!has) { u.risk = pl.risk; u.cost = pl.cost; }
+      assert.strictEqual(U.activeId(u, { hasOffer: has }, deps), p.id, `${p.id} ${has} ${ins.instrument}`);
+      // Instrument und Stop setzt das Preset nicht: ein anderer Wert lässt es aktiv (wie die Video-Felder)
+      assert.strictEqual(U.activeId(Object.assign({}, u, { instrument: 'ES' }), { hasOffer: has }, deps), p.id);
+      assert.strictEqual(U.activeId(Object.assign({}, u, { stopPts: ins.stopPts + 1 }), { hasOffer: has }, deps), p.id);
+      // Strategiefeld ändern löscht die Markierung weiterhin
+      assert.notStrictEqual(U.activeId(Object.assign({}, u, { wr: u.wr + 1 }), { hasOffer: has }, deps), p.id);
+    }
+  }
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', Fehler siehe oben' : ''}.`);

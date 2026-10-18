@@ -6,12 +6,15 @@
 
   // Felder mit eigenem Eingabeelement in der Oberfläche. Was hier steht, gewinnt gegen das Angebot.
   const UI_KEYS=['mode','hfund','ddStatic','fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n',
-    'tradesPerDay','dllCompliant','consCompliant','daysCompliant','slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer'];
+    'tradesPerDay','dllCompliant','consCompliant','daysCompliant','slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer','instrument','stopPts'];
   // Zahlenfelder mit Regler (Reihenfolge wie in der Oberfläche) und Schalter, die apply(P) schreibt und uiVals() zurückliest
   const NUM_KEYS=['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const FLAG_KEYS=['hfund','ddStatic','dllCompliant','consCompliant','daysCompliant'];
   // Strategie: was applyOffer und die Rangliste aus der Oberfläche an autoParams geben
-  const STRAT_KEYS=['wr','rr','tradesPerDay','dllCompliant','consCompliant','daysCompliant','hfund','slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer'];
+  const STRAT_KEYS=['wr','rr','tradesPerDay','dllCompliant','consCompliant','daysCompliant','hfund','slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer','instrument','stopPts'];
+  // Kontraktlimits (M-023): $ je Indexpunkt laut CME (Micro = 1/10), Abruf 18.10.2026 (Orchestrator):
+  // https://www.cmegroup.com/articles/faqs/micro-e-mini-equity-index-futures-frequently-asked-questions.html
+  const INSTRUMENTS={NQ:{pt:20,micro:false},MNQ:{pt:2,micro:true},ES:{pt:50,micro:false},MES:{pt:5,micro:true}};
   // Slippage am Stop (M-017b): Schlüssel in P und Standard der Eingabefelder (slipTailProb im Feld in % der Verluste, in P als Anteil)
   const SLIP_KEYS=['slipMode','slipPct','slipTailPct','slipTailProb','slipBuffer'];
   const SLIP_NUM=['slipPct','slipTailPct','slipTailProb','slipBuffer'];
@@ -32,6 +35,11 @@
     const m=o.slipMode;
     if(m===undefined || m==='none'){ for(const k of SLIP_KEYS) delete o[k]; return o; }
     if(m==='fixed'){ delete o.slipTailPct; delete o.slipTailProb; }
+    return o;
+  }
+  // Instrument aus (oder fehlend) → keine Schlüssel instrument/stopPts (bit-gleich zu ohne M-023). Ändert o.
+  function cleanInst(o){
+    if(o.instrument===undefined || o.instrument==='none'){ delete o.instrument; delete o.stopPts; }
     return o;
   }
   // Eingabefelder → Slip-Schlüssel in P (einzige Umrechnung % der Verluste → Anteil). f: {slipMode, slipPct, slipTailPct, slipTailProb (%), slipBuffer}
@@ -71,10 +79,19 @@
     return L.length?Math.min(...L):null;
   }
 
+  // Kontraktlimit des Angebots für das gewählte Instrument (null = keine Prüfung)
+  function contractLimit(P){
+    const ins=INSTRUMENTS[P.instrument], r=P.rules;
+    if(!ins || !r) return null;
+    const max=ins.micro?(r.maxMicro!=null?r.maxMicro:r.maxMini!=null?r.maxMini*10:null):r.maxMini;
+    if(!(max>0)) return null;
+    return {ins,max,unit:ins.micro?'Micro':'Mini',stop:P.stopPts};
+  }
+
   function autoParams(offer, ui){
     ui=ui||{};
     const own={}; for(const k in ui) if(!CTRL_KEYS.includes(k)) own[k]=ui[k];
-    cleanSlip(own);
+    cleanSlip(own); cleanInst(own);
     if(!offer) return slipCheck(own);
 
     const instant=offer.mode==='instant';
@@ -136,6 +153,29 @@
         P.reason=`${what} (${de(need(P.risk,P.cost))} $) erreichen den ${name} (${de(P.shield)} $). Jeder volle Stop wäre ein Bruch.`;
       }
     }
+    // Kontraktlimit (M-023): Kontrakte = risk ÷ (Stop × $/Punkt), Micro gegen maxMicro, Mini gegen maxMini; cost und Puffer zählen nicht.
+    // Nur prüfen, nicht auf das Kontrakt-Raster runden. Ohne Instrument oder ohne Limit im Angebot keine Prüfung.
+    const lim2=contractLimit(P);
+    if(!P.notTradable && lim2){
+      const {ins,max,unit,stop}=lim2, perC=stop*ins.pt, k=r=>de(r/perC);
+      if(!(stop>0)){
+        P.notTradable=true; P.reason='Stop in Punkten muss eine Zahl > 0 sein.';
+      } else if(P.risk>max*perC+1e-9){
+        if(auto){
+          const from=P.risk, r=Math.floor(max*perC/5)*5;
+          if(r>=5){
+            P.risk=r; P.cost=autoCost(r,costPct); P.riskCapped=true;
+            P.reason=(P.reason?P.reason+' ':'')+`Risiko auf ${r} $ gedeckelt (statt ${from} $), damit ${k(r)} ${P.instrument} bei ${de(stop)} Punkten Stop im Kontraktlimit (${max} ${unit}) bleiben.`;
+          } else {
+            P.notTradable=true;
+            P.reason=`Auch mit 5 $ Risiko wären ${k(5)} ${P.instrument} bei ${de(stop)} Punkten Stop über dem Kontraktlimit (${max} ${unit}). Kein Trade möglich.`;
+          }
+        } else {
+          P.notTradable=true;
+          P.reason=`${k(P.risk)} ${P.instrument} bei ${de(stop)} Punkten Stop, erlaubt sind ${max} ${unit}. Risiko senken oder Stop vergrößern.`;
+        }
+      }
+    }
     // Gewinntage (M-004): Schwelle, die selbst ein Tag nur mit Gewinn-Trades nicht erreicht, prüft prepare() ebenfalls
     if(!P.notTradable && P.rr!==undefined){
       const dayMax=(P.tradesPerDay||1)*(P.risk*P.rr-P.cost);
@@ -156,7 +196,7 @@
     opts=opts||{};
     const s={};
     for(const k of STRAT_KEYS) if(u[k]!==undefined) s[k]=u[k];
-    cleanSlip(s);
+    cleanSlip(s); cleanInst(s);
     s.n=opts.n!==undefined?opts.n:u.n;
     s.riskPct=u.riskPct??DEF.riskPct; s.costPct=u.costPct??DEF.costPct; s.autorisk=u.autorisk!==false;
     if(!s.autorisk){ s.risk=u.risk; s.cost=u.cost; }
@@ -175,9 +215,12 @@
       u[k]=x;
     }
     // Slippage: so, wie die Felder sie halten (P → Felder → uiVals)
-    return Object.assign(u,slipFromUi(slipFields(P)));
+    Object.assign(u,slipFromUi(slipFields(P)));
+    // Instrument (M-023): nur gesetzt, wenn ein Instrument gewählt ist
+    if(INSTRUMENTS[P.instrument]){ u.instrument=P.instrument; u.stopPts=num(P.stopPts); }
+    return u;
   }
 
-  const api={autoParams,dllMin,calibHp,stratFromUi,uiFromP,slipFromUi,slipFields,SLIP_KEYS,SLIP_NUM,SLIP_DEF,UI_KEYS,CTRL_KEYS,CORE_KEYS,NUM_KEYS,FLAG_KEYS,STRAT_KEYS,DEF};
+  const api={autoParams,dllMin,contractLimit,INSTRUMENTS,calibHp,stratFromUi,uiFromP,slipFromUi,slipFields,SLIP_KEYS,SLIP_NUM,SLIP_DEF,UI_KEYS,CTRL_KEYS,CORE_KEYS,NUM_KEYS,FLAG_KEYS,STRAT_KEYS,DEF};
   if(typeof module!=='undefined' && module.exports) module.exports=api; else root.GlitchParams=api;
 })(typeof self!=='undefined'?self:this);

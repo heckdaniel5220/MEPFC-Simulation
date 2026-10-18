@@ -571,4 +571,21 @@ test('M-021 typeSummary: Gruppe Shield als Bezeichnung bekannt', () => {
   assert.ok(s.types[0].sentences.find(x => x.key === 'typeCost').text.includes('Guardian Shield / Max Risk'));
 });
 
+
+test('M-023 Regelblatt: Mini/Micro im Modell bei gewähltem Instrument, Scaling-Stufen nicht abgebildet, Lot-Limit unverändert', () => {
+  const ent = id => ruleSheet(byId(id)).groups.find(G => G.key === 'risiko').entries;
+  const lab = id => ent(id).map(e => e.label);
+  for (const id of ['af-std-50', 'mf-pro-50', 'bg-fut-direct-25']) {
+    assert.ok(lab(id).includes('Max. Mini / Micro (im Modell bei gewähltem Instrument)'), id);
+    assert.ok(!lab(id).some(l => /Mini \/ Micro \(nicht im Modell\)/.test(l)), id);
+  }
+  assert.ok(lab('af-std-50').includes('Scaling-Plan (Stufen nicht abgebildet)'));
+  assert.ok(lab('ac-d-50').includes('Lot-Limit (nicht im Modell)'));
+  assert.ok(lab('bg-cfd-1step-50').includes('Hebel (nicht im Modell)'));
+  // note-Zusatz nur bei den 5 AF-Angeboten mit Scaling
+  const sc = ALL.filter(x => /Stufen nicht belegt: Startstufe kann niedriger sein \(nicht abgebildet\)\./.test(x.o.note)).map(x => x.o.id).sort();
+  assert.deepStrictEqual(sc, ALL.filter(x => x.o.rules && x.o.rules.scaling === true).map(x => x.o.id).sort());
+  assert.strictEqual(sc.length, 5);
+});
+
 console.log(`${passed} Tests bestanden`);

@@ -71,6 +71,17 @@
         <div class="ctl"><div class="row"><label for="wr">Trefferquote</label><output id="wr-o"></output></div><input type="range" id="wr" min="10" max="80" step="1"><small id="wr-hint"></small></div>
         <div class="ctl"><div class="row"><label for="cost">Kosten pro Trade (Spread + Kommission)</label><output id="cost-o"></output></div><input type="range" id="cost" min="0" max="60" step="1"></div>
         <div class="ctl"><div class="row"><label for="tradesPerDay">Trades pro Tag</label><output id="tradesPerDay-o"></output></div><input type="range" id="tradesPerDay" min="1" max="10" step="1" value="1"></div>
+        <div class="ctl">
+          <label for="instrument">Instrument (für das Kontraktlimit)</label>
+          <select id="instrument" class="sel">
+            <option value="none">aus</option>
+            <option value="NQ">NQ · E-mini Nasdaq-100 (20 $ je Punkt)</option>
+            <option value="MNQ">MNQ · Micro E-mini Nasdaq-100 (2 $ je Punkt)</option>
+            <option value="ES">ES · E-mini S&amp;P 500 (50 $ je Punkt)</option>
+            <option value="MES">MES · Micro E-mini S&amp;P 500 (5 $ je Punkt)</option>
+          </select>
+        </div>
+        <div class="ctl" id="w-stopPts" hidden><div class="row"><label for="stopPts">Stopabstand in Punkten</label><output id="stopPts-o"></output></div><input type="range" id="stopPts" min="1" max="200" step="0.25" value="25"><small id="inst-hint"></small></div>
         <label class="check"><input type="checkbox" id="dllCompliant" checked> Daily Loss Limit regeltreu (keinen Trade eröffnen, der das Tageslimit reißen kann)</label>
         <label class="check"><input type="checkbox" id="consCompliant" checked> Consistency regeltreu (Tag beenden, wenn die Regel Ziel oder Auszahlung blockiert)</label>
         <label class="check"><input type="checkbox" id="daysCompliant" checked> Tage-Regeln regeltreu (Tag beenden, wenn nur noch Handels- oder Gewinntage fehlen)</label>
