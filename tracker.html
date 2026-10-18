@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tracker – eigene Prop-Accounts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav class="sitenav" aria-label="Seiten"><a href="index.html">Simulator</a><a href="rechner.html">Rechner</a><a href="tracker.html" aria-current="page">Tracker</a></nav>
+  <header>
+    <h1>Tracker</h1>
+    <p>Eigene Prop-Accounts von Hand führen: Tagesergebnisse eintragen, Regeln des Angebots prüfen lassen, Fees und Auszahlungen zusammenzählen.</p>
+  </header>
+
+  <p class="note tr-intro">Alle Werte trägst du von Hand ein. Maßgeblich ist immer das Dashboard der Firma. Die Daten bleiben in diesem Browser, getrennt je Adresse (die Datei direkt geöffnet und <span class="num">localhost:8000</span> haben getrennte Speicher). Sichere sie mit „Export“. Nur Prop-Accounts, keine Anbindung an Broker oder Schnittstellen, nichts läuft automatisch.</p>
+  <div class="warn" id="tr-store" role="status" hidden></div>
+
+  <section class="panel tr-over" aria-labelledby="tr-over-h">
+    <div class="tr-bar">
+      <h2 id="tr-over-h">Übersicht</h2>
+      <div class="tr-btns">
+        <button type="button" class="btn tr-go" data-act="new">+ Account</button>
+        <button type="button" class="btn" data-act="export">Export</button>
+        <button type="button" class="btn" data-act="import">Import</button>
+        <input type="file" id="tr-file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+    <p class="note" id="tr-io" role="status"></p>
+    <div id="tr-over-body"></div>
+  </section>
+
+  <section class="panel tr-new" id="tr-new" hidden></section>
+  <section class="panel tr-detail" id="tr-detail" hidden></section>
+
+  <p class="note">Der Import ersetzt den ganzen Stand (nach Bestätigung). Regeln werden beim Anlegen aus dem Angebot übernommen und gespeichert; ändert sich das Angebot später, zeigt der Account einen Hinweis.</p>
+</div>
+<script src="js/offers.js"></script>
+<script src="js/explain.js"></script>
+<script src="js/tracker.js"></script>
+<script src="js/trackerUi.js"></script>
+</body>
+</html>
