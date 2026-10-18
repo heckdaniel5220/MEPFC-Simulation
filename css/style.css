@@ -235,3 +235,30 @@ input:disabled,input[type=number]:disabled{cursor:not-allowed}
 .strat-list .st-sub{font-size:12px;font-weight:500;color:var(--muted);font-family:var(--f-num);font-variant-numeric:tabular-nums}
 .pill.st-yes{background:color-mix(in srgb,var(--pos) 15%,transparent);color:var(--pos)}
 .pill.st-no{background:var(--surface);color:var(--muted);border:1px solid var(--line)}
+/* Link-Leiste zwischen den Seiten (M-027/M-028): eigene Seite fett, ohne Link-Stil */
+.sitenav{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:14px;margin-bottom:-8px}
+.sitenav a{color:var(--nohedge);text-decoration:underline;text-underline-offset:3px;padding:4px 0}
+.sitenav a:hover{text-decoration-thickness:2px}
+.sitenav a[aria-current="page"]{color:var(--ink);font-weight:700;text-decoration:none}
+.sitenav a:focus-visible{outline:2px solid var(--nohedge);outline-offset:2px}
+/* Rechner Positionsgröße und Risiko (M-027) */
+.rc-grid{display:grid;grid-template-columns:minmax(0,380px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.rc-grid{grid-template-columns:minmax(0,1fr)}}
+.rc-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.rc-in{font:inherit;font-family:var(--f-num);font-variant-numeric:tabular-nums;font-size:14px;padding:7px 8px;border-radius:8px;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);width:100%;min-width:0}
+.rc-help{color:var(--muted);font-size:12px}
+.rc-out{display:flex;flex-direction:column;gap:10px;min-width:0}
+.rc-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0}
+.rc-sub{font-size:14px;font-weight:700;margin:6px 0 0}
+.rc-qty{font-family:var(--f-num);font-size:32px;font-weight:600;line-height:1.1;margin:0;font-variant-numeric:tabular-nums}
+.rc-budget{margin:0;color:var(--muted);font-size:14px}
+.rc-lines{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;margin:0;font-size:14px}
+.rc-lines dt{color:var(--muted)}
+.rc-lines dd{margin:0;font-variant-numeric:tabular-nums}
+@media (max-width:520px){.rc-lines{grid-template-columns:minmax(0,1fr);gap:0}.rc-lines dd{margin-bottom:8px}}
+.rc-checks,.rc-notes{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.rc-checks li{border-left:3px solid var(--pos);padding:4px 0 4px 10px}
+.rc-checks li.rc-viol{border-left-color:var(--neg);background:var(--warnbg);color:var(--warnink);border-radius:0 8px 8px 0;padding:8px 10px}
+.rc-hint{margin:0;font-size:13px;color:var(--muted)}
+.rc-notes{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:10px}
