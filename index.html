@@ -108,6 +108,7 @@
 
       <fieldset class="hedge-legend">
         <legend>Gegentrade auf Echtgeld-Konto</legend>
+        <small class="note hedge-ban">Alle hier simulierten Firmen verbieten Gegenpositionen über Konten, bei Verstoß fallen die Payouts weg. Der Gegentrade ist hier reine Analyse: Er verschiebt vor allem, wann die Fee bezahlt wird. Einen eigenen Vorteil bringt er nicht. Ohne Edge kostet er die zusätzlichen Kosten, mit Edge kostet er Geld.</small>
         <div class="ctl"><div class="row"><label for="hp">Größe Gegentrade (in % der Prop-Position)</label><output id="hp-o"></output></div><input type="range" id="hp" min="0" max="30" step="0.5"><small id="hp-hint"></small></div>
         <div class="btnrow"><button type="button" class="btn" id="calib">Wie im Video: Fee + kleiner Gewinn zurück</button></div>
         <small class="note">Wie im Video läuft der Gegentrade nur, bis die Challenge bestanden ist. Bei Instant Funding läuft er bis zur ersten Auszahlung.</small>
@@ -169,6 +170,7 @@
           <p class="note" id="outc"></p>
           <p class="note" id="slipc" hidden></p>
           <p class="note" id="shieldc" hidden></p>
+          <p class="note" id="timec" hidden></p>
         </div>
       </div>
 

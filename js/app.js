@@ -240,6 +240,9 @@
     if(shieldOn) $('shieldc').textContent=shieldNote(R,P);
     const sw=EXP.shieldWarnText(P);
     $('slip-shield').hidden=!sw; if(sw) $('slip-shield').textContent=sw;
+    // Zeit (M-024): nur bei Tage-, Kalender- oder Eval-Consistency-Regel, Teilsätze nur zu vorhandenen Regeln
+    const tn=timeNote(R,P);
+    $('timec').hidden=!tn; if(tn) $('timec').textContent=tn;
 
     // more: nachgerechnete Details ab Account 13 (Cache, verfällt mit jedem neuen Lauf)
     last={R,P,instant,slip:slipOn,shield:shieldOn,seed,more:new Map()};
@@ -266,6 +269,22 @@
       ? `${lim}: ${fmt0.format(R.shieldBreaches)} Brüche, ${fmt0.format(hit)} Accounts mit mindestens einem Bruch (ab dann Split ${pctDe1(P.shieldSplit)} %), davon ${fmt0.format(R.shieldLost)} dadurch verloren.${tail}`
       : `${lim}: ${fmt0.format(R.shieldLost)} Accounts dadurch verloren (1. Bruch = verloren).${tail}`;
   }
+  // Tage- und Kalenderregeln (M-024): welche Regel P hat, Spalten der Detailtabelle und Notiz #timec
+  const fmt1=new Intl.NumberFormat('de-DE',{minimumFractionDigits:1,maximumFractionDigits:1});
+  const rulesOf=P=>({evalDays:P.mode==='challenge'&&(P.evalMinDays>0||P.evalWinDays>0), payDays:P.payMinDays>0||P.payWinDays>0,
+    cal:P.payFirstAfterCal>0||P.payEveryCal>0, consEval:P.mode==='challenge'&&P.consEval>0});
+  function timeNote(R,P){
+    const g=rulesOf(P); if(!g.evalDays&&!g.payDays&&!g.cal&&!g.consEval) return '';
+    const f=R.days.funded, d=v=>v===null?'–':fmt1.format(v);
+    let t=f.calToFirstPay===null?'Zeit: kein Account mit Auszahlung.':`Zeit: Ø ${d(f.calToFirstPay)} Kalendertage bis zur 1. Auszahlung (ab Account-Start).`;
+    const del=[]; if(g.evalDays) del.push(`durch Tage-Regeln Ø ${d(R.daysPassDelay)} Tage`); if(g.consEval) del.push(`durch Consistency Ø ${d(R.consPassDelay)} Tage`);
+    if(del.length) t+=` Bestehen verzögert ${del.join(', ')}${del.length>1?' (je ab dem ersten blockierten Tag, nicht addierbar)':' (ab dem ersten blockierten Tag)'}.`;
+    if(f.n){
+      if(g.payDays) t+=` Tage-Blockaden vor Auszahlungen Ø ${d(f.daysBlocks)} je Funded-Account.`;
+      if(g.cal) t+=` Kalender-Pausen Ø ${d(f.calBlocks)} je Funded-Account (${d(f.calWaitDays)} Börsentage ohne Trade).`;
+    }
+    return t;
+  }
   function shieldCell(x,P){
     if(x.shieldLost) return '<span class="neg">verloren</span>';
     if(x.shieldBreaches>0) return `${x.shieldBreaches} Bruch · Split ${pctDe1(P.shieldSplit)} %`;
@@ -282,12 +301,12 @@
       : `<span class="pill pass">${instant?'verloren':'bestanden, kein Payout'}</span>`;
   }
   function detail(a,slip,P){
-    const shield=P.shield>0;
-    let h=`<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consistency-Blockaden</th>${slip?'<th>Slippage-Brüche DLL / DD</th>':''}${shield?'<th>Shield-Brüche</th>':''}</tr></thead><tbody>`;
+    const shield=P.shield>0, g=rulesOf(P), dCol=g.evalDays||g.payDays;
+    let h=`<div class="det"><table><thead><tr><th>Phase</th><th>Handels&shy;tage</th><th>Gewinn&shy;tage</th><th>Tag von–bis</th><th>DLL-Stopps</th><th>Consis&shy;tency-Blocka&shy;den</th>${dCol?'<th>Tage-Blocka&shy;den</th>':''}${g.cal?'<th>Kalender-Pausen / Tage</th>':''}${slip?'<th>Slippage-Brüche DLL / DD</th>':''}${shield?'<th>Shield-Brüche</th>':''}</tr></thead><tbody>`;
     let pnl='';
     for(const k of ['step1','step2','funded']){
       const ph=a.phases[k]; if(!ph) continue;
-      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td>${slip?`<td>${ph.dllSlipBreaches} / ${ph.ddSlipBreaches}</td>`:''}${shield?`<td>${k==='funded'?ph.shieldBreaches:'–'}</td>`:''}</tr>`;
+      h+=`<tr><td class="txt">${PHN[k]}</td><td>${ph.days}</td><td>${ph.winDays}</td><td>${ph.firstDay===null?'–':ph.firstDay+'–'+ph.lastDay}</td><td>${ph.dllStops}</td><td>${ph.consBlocks}</td>${dCol?`<td>${(k==='funded'?g.payDays:g.evalDays)?ph.daysBlocks:'–'}</td>`:''}${g.cal?`<td>${k==='funded'?ph.calBlocks+' / '+ph.calWaitDays:'–'}</td>`:''}${slip?`<td>${ph.dllSlipBreaches} / ${ph.ddSlipBreaches}</td>`:''}${shield?`<td>${k==='funded'?ph.shieldBreaches:'–'}</td>`:''}</tr>`;
       const d=ph.dayPnl, more=d.length>40?` … (${fmt0.format(d.length)} Tage)`:'';
       pnl+=`<p><b>${PHN[k]}</b> Tages-P&amp;L: ${d.slice(0,40).map(v=>`<span class="${v>0?'pos':v<0?'neg':''}">${sgn(v)}</span>`).join(' · ')}${more}</p>`;
     }
@@ -296,6 +315,8 @@
       const name=EXP.shieldExposure(P).name, b=a.phases.funded?a.phases.funded.shieldBreaches:0;
       h+=`<p>${a.shieldLost?`Account durch den ${name} verloren.`:b>0?`${name}: ${b} Bruch, ab dann Split ${pctDe1(P.shieldSplit)} %.`:`${name}: kein Bruch.`}</p>`;
     }
+    if(dCol) h+='<p>Tage-Blockaden: Tage, an denen Ziel bzw. Auszahlungsschwelle erreicht waren, aber Handels- oder Gewinntage fehlten.</p>';
+    if(g.cal) h+='<p>Kalender-Pausen: Der Trader wartet ohne Trade bis zum frühesten Auszahlungstag. Tage = Börsentage ohne Trade inklusive Auszahlungstag.</p>';
     if(slip) h+=`<p>Slippage auf dem Prop-Konto ${usd(a.slipPaid)}. Slippage-Brüche: Tageslimit bzw. Drawdown wäre ohne die Slippage dieses Trades nicht gerissen. Der DD-Anteil hängt stark am Raster der Verluste (Vielfache von Risiko + Kosten) und ist nur ein Hinweis.</p>`;
     h+='</div>';
     return h;

@@ -65,6 +65,8 @@ legend{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.0
 input[type=range]{width:100%;accent-color:var(--ink)}
 .check{display:flex;gap:8px;align-items:center;font-size:14px}
 .hedge-legend{border-left:3px solid var(--hedge);padding-left:10px}
+/* Fester Hinweis im Gegentrade-Bereich (M-024): Text wie Fließtext, nicht wie Hilfetext */
+.hedge-legend .hedge-ban{color:var(--ink);line-height:1.5}
 .dis{opacity:.4;pointer-events:none}
 .results{display:flex;flex-direction:column;gap:20px;min-width:0}
 .kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
@@ -110,7 +112,8 @@ td.txt{font-family:var(--f-body)}
 .list tr.open .chev::before{content:"▾"}
 .detrow>td{background:var(--sunk);text-align:left;white-space:normal;font-family:var(--f-body);padding:10px 12px}
 .det table{font-size:13px;width:auto;margin-bottom:6px}
-.list .det th{padding:4px 10px;white-space:nowrap}
+/* Köpfe der Detailtabelle brechen um (M-024), Zahlenzellen nicht */
+.list .det th{padding:4px 10px;white-space:normal;max-width:7.5em;vertical-align:bottom;hyphens:manual}
 .list .det td{padding:4px 10px}
 .det p{margin:6px 0 0;font-size:13px;line-height:1.6}
 .det p span{font-family:var(--f-num);white-space:nowrap}
