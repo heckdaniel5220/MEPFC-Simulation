@@ -144,7 +144,7 @@
       hFail:0,nFail:0,hSucc:0,nSucc:0,hAfter:0,shieldBreaches:0,shieldLost:0};
     const cal=calDay;
     const PH=['step1','step2','funded'], sum={}, toPass=[];
-    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,shieldBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0};
+    for(const k of PH) sum[k]={n:0,tradingDays:0,winDays:0,dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,shieldBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,calWaitDays:0};
     const delays=[], dDelays=[], firstPays=[], firstPayCals=[]; let hitN=0, hitFail=0;
     const LOSS=P.risk+P.cost, hard=P.dllType==='hard';
     // Slippage (M-017): Vorabprüfung des regeltreuen Traders mit Puffer
@@ -168,7 +168,7 @@
         return gross-P.cost;
       };
       // Tageszähler einer Phase; ein Tag zählt nur mit mindestens einem Trade
-      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,shieldBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,firstPayDay:null,payDays:[],bestDay:[]}; a.phases[k]=ph; return ph; };
+      const openPhase=k=>{ const ph={days:0,winDays:0,firstDay:null,lastDay:null,dayPnl:[],dayDll:[],dllStops:0,dllBreaches:0,dllSlipBreaches:0,ddSlipBreaches:0,shieldBreaches:0,consBlocks:0,daysBlocks:0,calBlocks:0,calWaitDays:0,firstPayDay:null,payDays:[],bestDay:[]}; a.phases[k]=ph; return ph; };
       // DLL vor dem Trade (regeltreu): true = Trade verweigert, Tag endet
       const refuse=(ph,lim,pnl)=>{ if(lim>0 && P.dllCompliant && pnl-LOSSB<=-lim){ ph.dllStops++; return true; } return false; };
       // DLL nach dem Trade: 0 = weiter, 1 = Tag endet (soft), 2 = Bruch (hard)
@@ -252,8 +252,10 @@
           day++;
           if(calFirst===0) calFirst=cal(day);
           // Pause: Wartetage ohne Trade bis zum Freigabetag, dort Auszahlung am Tagesende ohne Trade (kein Handelstag)
+          // calWaitDays: Börsentage ohne Trade in der Pause, inklusive Freigabetag (keine Zufallszahl)
           if(wait){
-            const u=unlock(); while(cal(day)<u) day++;
+            const u=unlock(), d0=day; while(cal(day)<u) day++;
+            ph.calWaitDays+=day-d0+1;
             wait=false; pay();
             if(P.consFundedMode==='cycle') best=0;
             ctd=0; cwd=0; if(eq>peakEod) peakEod=eq;
@@ -296,7 +298,7 @@
           if(eq>peakEod) peakEod=eq;
         }
       }
-      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].dllSlipBreaches+=ph.dllSlipBreaches; sum[k].ddSlipBreaches+=ph.ddSlipBreaches; sum[k].shieldBreaches+=ph.shieldBreaches; sum[k].consBlocks+=ph.consBlocks; sum[k].daysBlocks+=ph.daysBlocks; sum[k].calBlocks+=ph.calBlocks; } }
+      for(const k of PH){ const ph=a.phases[k]; if(ph){ sum[k].n++; sum[k].tradingDays+=ph.days; sum[k].winDays+=ph.winDays; sum[k].dllStops+=ph.dllStops; sum[k].dllBreaches+=ph.dllBreaches; sum[k].dllSlipBreaches+=ph.dllSlipBreaches; sum[k].ddSlipBreaches+=ph.ddSlipBreaches; sum[k].shieldBreaches+=ph.shieldBreaches; sum[k].consBlocks+=ph.consBlocks; sum[k].daysBlocks+=ph.daysBlocks; sum[k].calBlocks+=ph.calBlocks; sum[k].calWaitDays+=ph.calWaitDays; } }
       if(P.mode==='challenge' && a.passed) toPass.push(a.phases.step1.days+(a.phases.step2?a.phases.step2.days:0));
       const fpd=a.phases.funded?a.phases.funded.firstPayDay:null;
       if(fpd!==null){ firstPays.push(fpd); firstPayCals.push(cal(fpd)); }
@@ -328,7 +330,7 @@
     for(const k of PH){ const s=sum[k]; res.days[k]={n:s.n,tradingDays:s.n?s.tradingDays/s.n:null,winDays:s.n?s.winDays/s.n:null,
       dllStops:s.n?s.dllStops/s.n:null,dllBreaches:s.n?s.dllBreaches/s.n:null,
       dllSlipBreaches:s.n?s.dllSlipBreaches/s.n:null,ddSlipBreaches:s.n?s.ddSlipBreaches/s.n:null,shieldBreaches:s.n?s.shieldBreaches/s.n:null,consBlocks:s.n?s.consBlocks/s.n:null,daysBlocks:s.n?s.daysBlocks/s.n:null,
-      calBlocks:s.n?s.calBlocks/s.n:null}; }
+      calBlocks:s.n?s.calBlocks/s.n:null,calWaitDays:s.n?s.calWaitDays/s.n:null}; }
     res.medianDaysToPass=median(toPass);
     // Consistency: Zusatztage vom ersten Blockade-Tag bis zum Bestehen (Step 1 + Step 2), Mittel über bestandene Accounts
     res.consPassDelay=delays.length?delays.reduce((x,y)=>x+y,0)/delays.length:null;

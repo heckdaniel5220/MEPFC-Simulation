@@ -1620,4 +1620,70 @@ test('M-022 Pflichttext und Wortprüfung: keine Umgehung, keine Ausführungsdeta
   assert.deepStrictEqual(Object.keys(PRESET_NOTES), ['whiteboard']);
 });
 
+// ---- M-024: Pausentage der Kalender-Pause (calWaitDays) ----
+const M24_P = (o, tpd, n) => { const P = autoParams(o, { wr: 46, rr: 1, tradesPerDay: tpd, n, riskPct: 25, costPct: 2 }); return P.notTradable ? null : prepare(P); };
+const m24Cal = P => P.payFirstAfterCal > 0 || P.payEveryCal > 0;
+// Ableitung aus den Detailfeldern: im Funded hat nur die Pause Tage ohne closeDay
+const m24Gap = f => (Math.max(f.lastDay, ...f.payDays) - f.firstDay + 1) - f.days;
+
+test('M-024 calWaitDays = Börsentage ohne Trade in der Pause inkl. Freigabetag, ohne Kalenderregel 0, Challenge 0', () => {
+  let withWait = 0;
+  for (const tpd of [1, 3]) for (const o of ALL) {
+    const P = M24_P(o, tpd, 300); if (!P) continue;
+    const R = simulate(P, SEED, { detail: [...Array(P.n).keys()] });
+    let sum = 0, cnt = 0;
+    for (const a of R.accts) {
+      for (const k of ['step1', 'step2']) if (a.phases[k]) assert.strictEqual(a.phases[k].calWaitDays, 0, o.id);
+      const f = a.phases.funded; if (!f) continue;
+      cnt++; sum += f.calWaitDays;
+      if (!m24Cal(P)) assert.strictEqual(f.calWaitDays, 0, o.id);
+      else if (f.firstDay !== null) assert.strictEqual(f.calWaitDays, m24Gap(f), o.id);
+      assert.ok(f.calWaitDays >= f.calBlocks, o.id + ' je Pause mindestens der Freigabetag');
+      if (f.calWaitDays > 0) withWait++;
+    }
+    assert.strictEqual(R.days.funded.calWaitDays, cnt ? sum / cnt : null, o.id);
+    for (const k of ['step1', 'step2']) if (R.days[k].n) assert.strictEqual(R.days[k].calWaitDays, 0, o.id);
+  }
+  assert.ok(withWait > 100, 'Pausen kommen vor: ' + withWait);
+  for (const k of Object.keys(PRESETS)) { const R = simulate(prepare(PRESETS[k]), SEED); assert.ok(R.days.funded.calWaitDays === 0 || R.days.funded.calWaitDays === null, k); }
+});
+
+test('M-024 Pause von Hand: Wartezeit 14 Kalendertage, Auszahlung am Freigabetag, Pausentage exakt', () => {
+  const P = prepare({ ...PRESETS.futures, n: 1, wr: 100, rr: 1, risk: 500, cost: 0, minp: 500, buf: 0, maxp: 1, payFirstAfterCal: 14 });
+  const R = simulate(P, SEED), f = R.accts[0].phases.funded;
+  // Funded-Tag 1 = Tag 7 (Kalendertag 9, Dienstag); Freigabe bei Kalendertag 9 + 14 = 23 = Tag 17; Pause Tag 8–17 = 10 Börsentage
+  assert.deepStrictEqual([f.firstDay, f.lastDay, f.payDays], [7, 7, [17]]);
+  assert.strictEqual(f.calBlocks, 1);
+  assert.strictEqual(f.calWaitDays, f.payDays[0] - f.lastDay);
+  assert.strictEqual(f.calWaitDays, m24Gap(f));
+  assert.strictEqual(f.calWaitDays, 10);
+});
+
+test('M-024 accountDetail bleibt bit-gleich mit calWaitDays (bg-cfd-2step-50 1 Trade/Tag, mf-pro-50 3 Trades/Tag), ohne Rückfall', () => {
+  const J = x => JSON.stringify(x);
+  for (const [id, tpd] of [['bg-cfd-2step-50', 1], ['mf-pro-50', 3]]) {
+    const P = M24_P(byId(id), tpd, 400), R = simulate(P, SEED);
+    const F = simulate(P, SEED, { detail: [...Array(P.n).keys()] });
+    let waits = 0;
+    for (let i = 0; i < P.n; i++) {
+      const d = accountDetail(P, SEED, R.list, i);
+      assert.strictEqual(d.fallback, false, id + ' #' + i);
+      assert.strictEqual(J(d.acct), J(F.accts[i]), id + ' #' + i);
+      if (d.acct.phases.funded && d.acct.phases.funded.calWaitDays > 0) waits++;
+    }
+    assert.ok(waits > 0, id + ' hat Pausen');
+  }
+});
+
+test('M-024 fester Gegentrade-Hinweis: erster Inhalt im Fieldset, Wortlaut, keine Ausführungsdetails', () => {
+  const html = require('fs').readFileSync(require.resolve('../index.html'), 'utf8');
+  const m = /<legend>Gegentrade auf Echtgeld-Konto<\/legend>\s*<small class="note hedge-ban">([^<]+)<\/small>/.exec(html);
+  assert.ok(m, 'Hinweis direkt nach der Legende');
+  assert.strictEqual(m[1], 'Alle hier simulierten Firmen verbieten Gegenpositionen über Konten, bei Verstoß fallen die Payouts weg. Der Gegentrade ist hier reine Analyse: Er verschiebt vor allem, wann die Fee bezahlt wird. Einen eigenen Vorteil bringt er nicht. Ohne Edge kostet er die zusätzlichen Kosten, mit Edge kostet er Geld.');
+  for (const re of [/\bLots?\b/i, /Broker/i, /Kontrakt/i, /Punkt/i]) assert.ok(!re.test(m[1]), String(re));
+  assert.ok(!/hedge-ban[^>]*hidden/.test(html), 'immer sichtbar');
+  // Modellwarnung behält ihren Satz (E4)
+  assert.ok(html.includes('Gegenpositionen über Konten verbieten alle hier simulierten Firmen. Bei Verstoß fallen Payouts weg.'));
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);
