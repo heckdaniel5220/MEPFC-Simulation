@@ -583,7 +583,10 @@ test('M-023 Regelblatt: Mini/Micro im Modell bei gewähltem Instrument, Scaling-
   assert.ok(lab('ac-d-50').includes('Lot-Limit (nicht im Modell)'));
   assert.ok(lab('bg-cfd-1step-50').includes('Hebel (nicht im Modell)'));
   // note-Zusatz nur bei den 5 AF-Angeboten mit Scaling
-  const sc = ALL.filter(x => /Stufen nicht belegt: Startstufe kann niedriger sein \(nicht abgebildet\)\./.test(x.o.note)).map(x => x.o.id).sort();
+  const sc = ALL.filter(x => /nicht belegt[:,] Startstufe kann niedriger sein \(nicht abgebildet\)\./.test(x.o.note)).map(x => x.o.id).sort();
+  // „nur im Qualified“ nur bei Standard (belegt durch 11632512), Zero mit eigener Fassung
+  assert.deepStrictEqual(ALL.filter(x => /Scaling nur im Qualified/.test(x.o.note)).map(x => x.o.id).sort(), ['af-std-100', 'af-std-150', 'af-std-50']);
+  assert.deepStrictEqual(ALL.filter(x => /Scaling laut Daten ja; Stufen und Geltungsbereich \(Eval\/Qualified\) nicht belegt, Startstufe kann niedriger sein \(nicht abgebildet\)\./.test(x.o.note)).map(x => x.o.id).sort(), ['af-zero-100', 'af-zero-50']);
   assert.deepStrictEqual(sc, ALL.filter(x => x.o.rules && x.o.rules.scaling === true).map(x => x.o.id).sort());
   assert.strictEqual(sc.length, 5);
 });
