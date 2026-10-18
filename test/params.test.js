@@ -386,4 +386,76 @@ test('M-019 Shield-Felder sind keine UI- oder Steuerfelder', () => {
   for (const k of ['shield', 'shieldSplit', 'shieldStrikes']) { assert.ok(!UI_KEYS.includes(k) && !CTRL_KEYS.includes(k), k); }
 });
 
+
+// ---- M-023 Kontraktlimits: Instrument und Stop in Punkten ----
+const P23 = require('../js/params.js');
+const FUT = ALL.filter(o => o.rules && o.rules.maxMini);
+const INS = { instrument: 'NQ', stopPts: 25 };
+
+test('M-023 Instrument aus: keine neuen Schlüssel, P gleich wie ohne Feld (alle Angebote, WR 40/46, Trades/Tag 1/3)', () => {
+  for (const o of ALL) for (const wr of [40, 46]) for (const tradesPerDay of [1, 3]) {
+    const base = { ...STRAT, wr, tradesPerDay };
+    const A = autoParams(o, base), B = autoParams(o, { ...base, instrument: 'none', stopPts: 25 });
+    assert.deepStrictEqual(B, A, o.id);
+    assert.ok(!('instrument' in B) && !('stopPts' in B), o.id);
+    assert.deepStrictEqual(stratFromUi({ ...base, instrument: 'none', stopPts: 25 }), stratFromUi(base));
+  }
+});
+
+test('M-023 Handrisiko über dem Limit: notTradable mit Grund (mf-pro-50, NQ 25 Pkt, 2.000 $)', () => {
+  const o = byId('mf-pro-50');
+  const P = autoParams(o, { ...STRAT, autorisk: false, risk: 2000, cost: 10, ...INS });
+  assert.strictEqual(P.notTradable, true);
+  assert.strictEqual(P.reason, '4 NQ bei 25 Punkten Stop, erlaubt sind 3 Mini. Risiko senken oder Stop vergrößern.');
+  // genau am Limit handelbar (3 NQ × 25 Pkt × 20 $ = 1.500 $), cost zählt nicht mit
+  const Q = autoParams(o, { ...STRAT, autorisk: false, risk: 1500, cost: 200, ...INS });
+  assert.ok(!Q.notTradable, Q.reason);
+  assert.strictEqual(Q.instrument, 'NQ'); assert.strictEqual(Q.stopPts, 25);
+});
+
+test('M-023 Auto-Risiko 50 % DD, NQ 10 Pkt: Deckel mit Grund, prepare wirft nie, Kontrakte im Limit', () => {
+  let capped = 0;
+  for (const o of ALL) for (const ins of ['NQ', 'MNQ', 'ES', 'MES']) for (const stopPts of [10, 25]) {
+    const P = autoParams(o, { ...STRAT, riskPct: 50, instrument: ins, stopPts });
+    if (P.notTradable) continue;
+    assert.doesNotThrow(() => prepare({ ...P }), o.id);
+    const L = P23.contractLimit(P);
+    if (!L) { assert.ok(!(o.rules && o.rules.maxMini), o.id); continue; }
+    assert.ok(P.risk <= L.max * stopPts * L.ins.pt + 1e-9, `${o.id} ${ins} ${P.risk}`);
+    if (/Kontraktlimit/.test(P.reason || '')) { capped++; assert.strictEqual(P.riskCapped, true, o.id); }
+  }
+  assert.ok(capped > 0);
+  const P = autoParams(byId('mf-pro-50'), { ...STRAT, riskPct: 50, instrument: 'NQ', stopPts: 10 });
+  assert.strictEqual(P.risk, 600); assert.strictEqual(P.cost, 12); assert.strictEqual(P.riskCapped, true);
+  assert.strictEqual(P.reason, 'Risiko auf 600 $ gedeckelt (statt 1000 $), damit 3 NQ bei 10 Punkten Stop im Kontraktlimit (3 Mini) bleiben.');
+});
+
+test('M-023 Micro und Mini liefern dieselbe Grenze (NQ/MNQ, ES/MES; Auto und Hand)', () => {
+  for (const o of FUT) for (const [mini, micro] of [['NQ', 'MNQ'], ['ES', 'MES']]) for (const stopPts of [5, 10, 25]) {
+    for (const u of [{ riskPct: 25 }, { riskPct: 50 }, { riskPct: 100 }, { autorisk: false, risk: 2000, cost: 10 }, { autorisk: false, risk: 500, cost: 10 }]) {
+      const A = autoParams(o, { ...STRAT, ...u, instrument: mini, stopPts });
+      const B = autoParams(o, { ...STRAT, ...u, instrument: micro, stopPts });
+      assert.strictEqual(B.risk, A.risk, `${o.id} ${micro} ${stopPts}`);
+      assert.strictEqual(!!B.notTradable, !!A.notTradable, `${o.id} ${micro} ${stopPts}`);
+    }
+    const Lm = P23.contractLimit({ rules: o.rules, instrument: mini, stopPts: 1 }), Lu = P23.contractLimit({ rules: o.rules, instrument: micro, stopPts: 1 });
+    assert.strictEqual(Lm.max * Lm.ins.pt, Lu.max * Lu.ins.pt, o.id);
+  }
+});
+
+test('M-023 ohne Angebotslimit keine Prüfung, Stop ≤ 0 nicht handelbar, Rundreise uiFromP/stratFromUi', () => {
+  // Video-Szenario und CFD: keine maxMini → keine Prüfung, Instrument bleibt nur als Strategiefeld
+  const V = autoParams(undefined, { ...PRESETS.whiteboard, ...INS });
+  assert.ok(!V.notTradable);
+  const C = autoParams(byId('ac-d-50'), { ...STRAT, autorisk: false, risk: 400, cost: 10, ...INS, stopPts: 0.01 });
+  assert.ok(!C.notTradable, C.reason);
+  const Z = autoParams(byId('af-std-50'), { ...STRAT, instrument: 'ES', stopPts: 0 });
+  assert.strictEqual(Z.notTradable, true); assert.strictEqual(Z.reason, 'Stop in Punkten muss eine Zahl > 0 sein.');
+  const s = stratFromUi({ ...STRAT, instrument: 'MES', stopPts: 12.5 });
+  assert.strictEqual(s.instrument, 'MES'); assert.strictEqual(s.stopPts, 12.5);
+  const P = autoParams(byId('af-std-50'), s), u = uiFromP(P);
+  assert.strictEqual(u.instrument, 'MES'); assert.strictEqual(u.stopPts, 12.5);
+  assert.ok(!('instrument' in uiFromP(autoParams(byId('af-std-50'), STRAT))));
+});
+
 console.log(`\n${passed} Tests bestanden${process.exitCode ? ', mindestens einer fehlgeschlagen' : ''}.`);

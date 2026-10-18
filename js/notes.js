@@ -90,6 +90,7 @@
     {id:'m-strikt',in:'m',re:/strikt </g,to:'der beste Tag muss unter der Grenze bleiben'},
     {id:'m-nicht-im-kern-teil',in:'m',re:/; ([^;]*) nicht im Kern\./,to:'; im Modell nicht abgebildet: $1.'},
     {id:'m-nicht-im-kern-satz',in:'m',re:/^(.*) nicht im Kern\.$/,to:'Im Modell nicht abgebildet: $1.'},
+    {id:'m-scaling-stufen',in:'m',re:/^(Scaling nur im Qualified, Stufen nicht belegt: |Scaling laut Daten ja; Stufen und Geltungsbereich \(Eval\/Qualified\) nicht belegt, )(.*) \(nicht abgebildet\)\.$/,to:'Im Modell nicht abgebildet: Scaling-Stufen ($1$2).'},
     {id:'m-reserve',in:'m',re:/^Reserve nicht abgebildet\.$/,to:'Im Modell nicht abgebildet: Reserve.'},
     {id:'m-nur-notiz-blockaden',in:'m',re:/^(.*) nur Notiz \(gemessen (\d+) Blockaden\)\.$/,to:'Im Modell nicht abgebildet: $1 (in Testläufen $2 Blockaden).'},
     {id:'m-inaktivitaet',in:'m',re:/^Inaktivität (\d+) Tage nur Notiz: im Kern (.*)$/,to:'Im Modell nicht abgebildet: Inaktivität $1 Tage; das Modell tradet $2'},

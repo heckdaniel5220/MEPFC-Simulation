@@ -10,7 +10,7 @@
   const IDS = ['fee','target','target2','dd','risk','rr','wr','cost','hp','buf','minp','wfrac','cap','split','maxp','n'];
   const {PRESETS,PRESET_NOTES,OFFERS}=window.GlitchData;
   const {simulate,prepare,accountDetail}=window.GlitchSim;
-  const {autoParams,stratFromUi,slipFromUi,slipFields,SLIP_NUM}=window.GlitchParams;
+  const {autoParams,stratFromUi,slipFromUi,slipFields,SLIP_NUM,contractLimit}=window.GlitchParams;
   const Rank=window.GlitchRank;
   // Strategie-Beispiele (M-018b): Modell, Klick-Plan und Aktiv-Prüfung in js/strategiesUi.js
   const GS=window.GlitchStrategies, SU=window.GlitchStrategiesUi, SDEPS={stratFromUi,slipFromUi,autoParams};
@@ -35,7 +35,26 @@
     IDS.forEach(k=>u[k]=val(k));
     // Slippage (M-017b): Felder → P-Schlüssel nur über slipFromUi (aus = keine Schlüssel, Anteil der Ausreißer in %)
     const f={slipMode:$('slipMode').value}; SLIP_NUM.forEach(k=>f[k]=val(k));
-    return Object.assign(u,slipFromUi(f));
+    Object.assign(u,slipFromUi(f));
+    // Kontraktlimit (M-023): aus = keine Schlüssel instrument/stopPts
+    const ins=$('instrument').value; if(ins!=='none'){ u.instrument=ins; u.stopPts=val('stopPts'); }
+    return u;
+  }
+  // Instrument-Felder aus einer Strategie setzen (fehlend = aus; der Stop behält dann seinen Wert)
+  function applyInst(src){
+    $('instrument').value=src.instrument||'none';
+    if(src.instrument) setNum('stopPts',src.stopPts);
+    instVis();
+  }
+  function instVis(){ const on=$('instrument').value!=='none'; $('w-stopPts').hidden=!on; }
+  // Kurztext des Instruments (null bei aus)
+  const instTxt=o=>o.instrument?`Instrument ${o.instrument}, Stop ${pctDe(o.stopPts)} Punkte`:null;
+  // Woran ein gedeckeltes Risiko liegt (Grund aus params.js)
+  function capWhy(reason){
+    const w=[]; reason=reason||'';
+    if(/Tageslimit|Guardian Shield|Max Risk/.test(reason)) w.push('DLL');
+    if(/Kontraktlimit/.test(reason)) w.push('Kontrakte');
+    return w.length?w.join(', '):'DLL';
   }
   // Slip-Felder setzen (aus P bzw. Strategie; fehlend = aus mit Standardwerten) und Sichtbarkeit anpassen
   function applySlip(src){
@@ -66,7 +85,7 @@
     setNum('tradesPerDay',st.tradesPerDay); setNum('riskPct',st.riskPct); setNum('costPct',st.costPct);
     ['dllCompliant','consCompliant','daysCompliant'].forEach(k=>{ $(k).checked=st[k]!==false; });
     $('hfund').checked=!!st.hfund; $('autorisk').checked=st.autorisk!==false;
-    applySlip(st);
+    applySlip(st); applyInst(st);
   }
   // UI gewinnt; vom gewählten Angebot kommen nur die Felder ohne UI-Element (DLL, Consistency, …). Unvorbereitet.
   function read(){ return autoParams(OFFER_BY[$('offer').value],uiVals()); }
@@ -125,6 +144,16 @@
     if(!miss.length) return '';
     return `Dieses Angebot hat ${miss.map(m=>m[0]).join(', ')}: Schalter ${miss.map(m=>`„${m[1]}“`).join(', ')} ohne Wirkung.`;
   }
+  // Kontrakte der eingestellten Position gegen das Limit des Angebots (M-023)
+  const deN=new Intl.NumberFormat('de-DE',{maximumFractionDigits:2});
+  function instHint(P,off){
+    if(!P.instrument) return '';
+    const L=off&&contractLimit(Object.assign({},P,{rules:off.rules}));
+    const base='Kontrakte = Risiko ÷ (Stop × $ je Punkt), ohne Kosten und Puffer. $ je Punkt laut CME, Micro = 1/10.';
+    if(!L) return base+' Wirkt nur bei einem gewählten Futures-Angebot mit Kontraktlimit.';
+    if(!(L.stop>0)) return base;
+    return `${base} Jetzt: ${deN.format(P.risk/(L.stop*L.ins.pt))} ${P.instrument}, erlaubt ${L.max} ${L.unit}.`;
+  }
   function render(){
     const P0=read(), off=OFFER_BY[$('offer').value];
     const instant=P0.mode==='instant';
@@ -132,6 +161,7 @@
     const autoOn=$('autorisk').checked;
     ['riskPct','costPct'].forEach(k=>{ $('w-'+k).classList.toggle('dis',!autoOn); $(k).disabled=!autoOn; $(k+'-n').disabled=!autoOn; });
     $('rule-hint').textContent=ruleHint(P0,off);
+    $('inst-hint').textContent=instHint(P0,off);
     if(P0.notTradable) return blocked(P0.reason);
     let P,R;
     try{ P=prepare(P0); R=simulate(P,seed); }
@@ -322,9 +352,9 @@
   $('trace').addEventListener('keydown',e=>{const tr=e.target.closest('tr[data-i]'); if(tr&&(e.key==='Enter'||e.key===' ')){e.preventDefault(); toggle(tr); const n=$('trace').querySelector(`tr[data-i="${tr.dataset.i}"]`); if(n) n.focus();}});
 
   // Zahlenfelder neben jeden Regler setzen
-  const UNIT={tradesPerDay:'×',riskPct:'%',costPct:'%',fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:'',slipPct:'%',slipTailPct:'%',slipTailProb:'%',slipBuffer:'%'};
+  const UNIT={tradesPerDay:'×',riskPct:'%',costPct:'%',fee:'$',target:'$',target2:'$',dd:'$',risk:'$',rr:'',wr:'%',cost:'$',hp:'%',buf:'$',minp:'$',wfrac:'%',cap:'$',split:'%',maxp:'×',n:'',slipPct:'%',slipTailPct:'%',slipTailProb:'%',slipBuffer:'%',stopPts:'Pkt'};
   const PRE={rr:'1 :'};
-  IDS.concat(EXTRA,SLIP_NUM).forEach(k=>{
+  IDS.concat(EXTRA,SLIP_NUM,['stopPts']).forEach(k=>{
     const rg=$(k), out=$(k+'-o'); if(!out) return;
     const box=document.createElement('span'); box.className='numbox';
     if(PRE[k]){const p=document.createElement('span');p.className='unit';p.textContent=PRE[k];box.appendChild(p);}
@@ -408,7 +438,7 @@
     const mr=o.maxRisk?`, max. ${usd(o.maxRisk)} offenes Risiko${size?` (${pctTxt(o.maxRisk/size*100)} % des Kontos)`:''}, Firmenregel, gilt hier auch in der Challenge (Modellannahme)`:'';
     $('offer-note').innerHTML=`<b>${o.n}</b>: ${o.mode==='instant'?'ohne Challenge':'Ziel '+usd(o.target)+two}, Drawdown ${usd(o.dd)} ${o.ddStatic?'statisch':'trailing'}. Fee ${usd(o.fee)} (Liste ${o.list}, Code ${o.code}).<br>${rulesTxt(o)}<br>${o.note}`
       +(autorisk?`<br>Risiko pro Trade = ${pctTxt(riskPct)} % des Drawdowns${mr}, Kosten = ${pctTxt(costPct)} % des Risikos. Ändern von Risiko- oder Kosten-% setzt die Angebotswerte zurück.`:'')
-      +(P.riskCapped?`<br><b>Risiko gedeckelt (DLL):</b> ${P.reason}`:'');
+      +(P.riskCapped?`<br><b>Risiko gedeckelt (${capWhy(P.reason)}):</b> ${P.reason}`:'');
   }
   $('offer').addEventListener('change',e=>{applyOffer(e.target.value);setPressed('');render();});
   $('autorisk').addEventListener('change',()=>{if($('offer').value){applyOffer($('offer').value);render();}});
@@ -440,6 +470,11 @@
   $('ctl').addEventListener('input',()=>{setPressed('');schedule();});
   $('mode').addEventListener('change',()=>{setPressed('');render();});
   $('slipMode').addEventListener('change',slipVis);
+  $('instrument').addEventListener('change',instVis);
+  // Instrument oder Stop ändern (M-023): mit Auto-Risiko das Angebot neu anwenden, damit der Kontrakt-Deckel greift (wie Risiko-%)
+  const reInst=()=>{ if($('offer').value&&$('autorisk').checked) applyOffer($('offer').value); };
+  $('instrument').addEventListener('change',reInst);
+  ['stopPts','stopPts-n'].forEach(id=>$(id).addEventListener('input',reInst));
   $('calib').addEventListener('click',()=>{const P=read();const v=Math.min(30,Math.round(P.fee*1.25/P.dd*200)/2);$('hp').value=v;$('hp-n').value=v;render();});
   $('reroll').addEventListener('click',()=>{seed=(seed*1103515245+12345)>>>0;render();checkStale();});
 
@@ -465,6 +500,8 @@
     $('rankRiskHint').textContent=$('autorisk').checked
       ? `Risiko je Angebot = ${pctTxt(val('riskPct'))} % des Drawdowns (gedeckelt auf Firmenlimit und Tageslimit), Kosten = ${pctTxt(val('costPct'))} % des Risikos.`
       : `Auto-Risiko ist aus: Alle Angebote rechnen mit ${usd(val('risk'))} Risiko und ${usd(val('cost'))} Kosten pro Trade aus dem Steuerpult. Kleine Konten sind damit oft nicht handelbar.`;
+    const it=instTxt(uiVals());
+    if(it) $('rankRiskHint').textContent+=` ${it}: Kontraktlimit je Angebot geprüft (Auto-Risiko gedeckelt, festes Risiko darüber nicht handelbar).`;
     const st=slipTxt(uiVals());
     if(st) $('rankRiskHint').textContent+=` ${st}, für alle Angebote gleich${uiVals().slipBuffer>0?' (der Puffer kann das Risiko je Angebot zusätzlich deckeln)':''}.`;
     // Shield (M-021): Slippage über dem Puffer; nach einem frischen Ranglistenlauf mit Anzahl der betroffenen Zeilen
@@ -524,7 +561,7 @@
     const m=[];
     if(r.leader) m.push('<span class="pill lead">Platz 1</span>');
     if(r.tie) m.push('<span class="pill tie">gleichauf</span>');
-    if(r.riskCapped) m.push(`<span class="pill cap" title="${r.reason}">Risiko gedeckelt (DLL)</span>`);
+    if(r.riskCapped) m.push(`<span class="pill cap" title="${r.reason}">Risiko gedeckelt (${capWhy(r.reason)})</span>`);
     if(r.notTradable) m.push('<span class="pill nt">nicht handelbar</span>');
     if(r.error) m.push(`<span class="pill exp" title="${r.error}">Fehler</span>`);
     const c=r.codeMark;
