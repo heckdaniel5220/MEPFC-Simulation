@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rechner · Glitch-Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav class="sitenav" aria-label="Seiten"><a href="index.html">Simulator</a><a href="rechner.html" aria-current="page">Rechner</a></nav>
+  <header>
+    <h1>Positionsgröße und Risiko</h1>
+    <p>Ein Konto, ein Trade: wie viele Kontrakte oder Lots zum Risiko passen, was ein voller Stop kostet und welche Regeln des gewählten Angebots er berührt.</p>
+  </header>
+
+  <div class="rc-grid">
+    <form class="panel rc-form" id="rc-form" onsubmit="return false">
+      <fieldset>
+        <legend>Eingaben</legend>
+        <div class="ctl">
+          <label for="rc-offer">Angebot</label>
+          <select id="rc-offer" class="sel"><option value="">– eigene Werte –</option></select>
+        </div>
+        <div class="rc-row" id="rc-own">
+          <div class="ctl"><label for="rc-size">Kontogröße ($)</label><input id="rc-size" class="rc-in" type="text" inputmode="decimal" value="50000"></div>
+          <div class="ctl"><label for="rc-dd">DD ($)</label><input id="rc-dd" class="rc-in" type="text" inputmode="decimal" value="2000"></div>
+        </div>
+        <div class="rc-row">
+          <div class="ctl"><label for="rc-risk">Risiko</label><input id="rc-risk" class="rc-in" type="text" inputmode="decimal" value="25"></div>
+          <div class="ctl"><label for="rc-rmode">bezogen auf</label>
+            <select id="rc-rmode" class="sel"><option value="dd">% des DD</option><option value="size">% der Kontogröße</option><option value="usd">$</option></select></div>
+        </div>
+        <div class="rc-row">
+          <div class="ctl"><label for="rc-ins">Instrument</label><select id="rc-ins" class="sel"></select></div>
+          <div class="ctl"><label for="rc-stop">Stop (Punkte)</label><input id="rc-stop" class="rc-in" type="text" inputmode="decimal" value="20"></div>
+        </div>
+        <div class="rc-row" id="rc-cfd" hidden>
+          <div class="ctl"><label for="rc-ptval">$ je Punkt und Lot</label><input id="rc-ptval" class="rc-in" type="text" inputmode="decimal" value="" placeholder="beim Broker nachsehen"></div>
+          <div class="ctl"><label for="rc-step">Lot-Schritt</label><input id="rc-step" class="rc-in" type="text" inputmode="decimal" value="0,01"></div>
+        </div>
+        <div class="rc-row">
+          <div class="ctl"><label for="rc-cost" id="rc-cost-l">Kosten je Kontrakt ($)</label><input id="rc-cost" class="rc-in" type="text" inputmode="decimal" value="0"></div>
+          <div class="ctl"><label for="rc-rr">CRV</label><input id="rc-rr" class="rc-in" type="text" inputmode="decimal" value="1,5"></div>
+        </div>
+        <small class="rc-help">Kosten: Kommission und Gebühren für Ein- und Ausstieg zusammen. Komma oder Punkt als Dezimalzeichen.</small>
+      </fieldset>
+    </form>
+
+    <section class="panel rc-out" aria-live="polite" aria-labelledby="rc-out-h">
+      <h2 class="rc-h" id="rc-out-h">Ergebnis</h2>
+      <div class="errbox" id="rc-err" hidden></div>
+      <div id="rc-res">
+        <p class="rc-qty" id="rc-qty"></p>
+        <p class="rc-budget" id="rc-budget"></p>
+        <p class="warn" id="rc-zero" hidden></p>
+        <dl class="rc-lines" id="rc-lines"></dl>
+        <h3 class="rc-sub" id="rc-checks-h">Regeln des Angebots</h3>
+        <ul class="rc-checks" id="rc-checks"></ul>
+        <p class="rc-hint" id="rc-lot" hidden></p>
+      </div>
+      <ul class="rc-notes" id="rc-notes"></ul>
+    </section>
+  </div>
+</div>
+
+<script src="js/offers.js"></script>
+<script src="js/params.js"></script>
+<script src="js/rank.js"></script>
+<script src="js/sizing.js"></script>
+<script>
+(function(){
+  'use strict';
+  const S=window.GlitchSizing, Pa=window.GlitchParams, D=window.GlitchData;
+  const deps={OFFERS:D.OFFERS,autoParams:Pa.autoParams,contractLimit:Pa.contractLimit,INSTRUMENTS:Pa.INSTRUMENTS,accountSize:window.GlitchRank.accountSize};
+  const KEY='mepfc-rechner-v1';
+  const $=id=>document.getElementById(id);
+  // Komma oder Punkt als Dezimalzeichen; „50.000“ bzw. „1.234,5“ mit Tausenderpunkt
+  const num=s=>{ let t=String(s).trim().replace(/\s/g,''); if(/^\d{1,3}(\.\d{3})+(,\d*)?$/.test(t)) t=t.replace(/\./g,''); t=t.replace(',','.'); return t===''?NaN:Number(t); };
+  const FIELDS=['rc-offer','rc-size','rc-dd','rc-risk','rc-rmode','rc-ins','rc-stop','rc-ptval','rc-step','rc-cost','rc-rr'];
+  const list=S.offerList(D.OFFERS);
+
+  // Angebote nach Gruppe
+  const sel=$('rc-offer'); let og=null, lastG=null;
+  for(const o of list){
+    if(o.group!==lastG){ og=document.createElement('optgroup'); og.label=o.group; sel.appendChild(og); lastG=o.group; }
+    const op=document.createElement('option'); op.value=o.id; op.textContent=o.label; og.appendChild(op);
+  }
+  const marketOf=id=>{ const f=list.find(o=>o.id===id); return f?f.market:null; };
+  function fillInstruments(){
+    const ins=$('rc-ins'), keep=ins.value, allowed=S.instrumentsFor(marketOf(sel.value));
+    ins.textContent='';
+    for(const k of allowed){ const op=document.createElement('option'); op.value=k; op.textContent=k; ins.appendChild(op); }
+    ins.value=allowed.includes(keep)?keep:(allowed.includes('MNQ')?'MNQ':allowed[0]);
+  }
+
+  function load(){
+    let s=null;
+    try{ s=JSON.parse(localStorage.getItem(KEY)||'null'); }catch(e){ s=null; }
+    if(!s || typeof s!=='object') s={'rc-offer':'af-std-50'};
+    if(s['rc-offer'] && !list.some(o=>o.id===s['rc-offer'])) s['rc-offer']='';
+    for(const id of FIELDS) if(id!=='rc-ins' && typeof s[id]==='string') $(id).value=s[id];
+    if(!$('rc-rmode').value) $('rc-rmode').value='dd';
+    fillInstruments();
+    if(typeof s['rc-ins']==='string' && [...$('rc-ins').options].some(o=>o.value===s['rc-ins'])) $('rc-ins').value=s['rc-ins'];
+  }
+  function save(){
+    const s={}; for(const id of FIELDS) s[id]=$(id).value;
+    try{ localStorage.setItem(KEY,JSON.stringify(s)); }catch(e){ /* ohne Speicher weiter */ }
+  }
+
+  function li(cls,text){ const e=document.createElement('li'); if(cls) e.className=cls; e.textContent=text; return e; }
+  function render(){
+    const ins=$('rc-ins').value, cfd=ins===S.CFD, own=!sel.value;
+    $('rc-own').hidden=!own; $('rc-cfd').hidden=!cfd;
+    $('rc-cost-l').textContent=cfd?'Kosten je Lot ($)':'Kosten je Kontrakt ($)';
+    const R=S.compute({offerId:sel.value||null,size:num($('rc-size').value),dd:num($('rc-dd').value),riskMode:$('rc-rmode').value,
+      riskVal:num($('rc-risk').value),instrument:ins,stopPts:num($('rc-stop').value),costPer:num($('rc-cost').value),rr:num($('rc-rr').value),
+      cfdPerPt:num($('rc-ptval').value),lotStep:num($('rc-step').value)},deps);
+    const err=$('rc-err'); err.hidden=R.ok; err.textContent=R.ok?'':R.errors.join(' ');
+    $('rc-res').hidden=!R.ok;
+    const notes=$('rc-notes'); notes.textContent=''; for(const n of R.notes) notes.appendChild(li('',n));
+    if(!R.ok) return;
+    $('rc-qty').textContent=R.qtyText;
+    $('rc-budget').textContent='Risiko-Budget: '+R.budgetText;
+    $('rc-zero').hidden=!R.zero; $('rc-zero').textContent=R.zero?R.zeroText:'';
+    const dl=$('rc-lines'); dl.textContent='';
+    for(const l of (R.zero?[]:R.lines)){ const dt=document.createElement('dt'), dd=document.createElement('dd'); dt.textContent=l.label; dd.textContent=l.text; dl.append(dt,dd); }
+    const ul=$('rc-checks'); ul.textContent='';
+    const showChecks=!R.zero && R.checks.length>0;
+    $('rc-checks-h').hidden=!showChecks; ul.hidden=!showChecks;
+    for(const c of (showChecks?R.checks:[])){
+      const e=document.createElement('li'); e.className=c.ok?'rc-ok':'rc-viol';
+      const b=document.createElement('strong'); b.textContent=(c.ok?'Hält: ':'Verstößt gegen ')+c.label+(c.ok?'':'.'); e.appendChild(b);
+      if(!c.ok){ const t=document.createElement('span'); t.textContent=' '+c.text; e.appendChild(t); }
+      ul.appendChild(e);
+    }
+    $('rc-lot').hidden=!R.lotHint; $('rc-lot').textContent=R.lotHint||'';
+  }
+  load(); render();
+  sel.addEventListener('change',()=>{ fillInstruments(); render(); save(); });
+  $('rc-form').addEventListener('input',e=>{ if(e.target!==sel){ render(); save(); } });
+  $('rc-form').addEventListener('change',e=>{ if(e.target!==sel){ render(); save(); } });
+})();
+</script>
+</body>
+</html>
