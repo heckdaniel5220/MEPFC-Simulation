@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Regeln je Prop-Firm</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+  <nav class="sitenav" aria-label="Seiten"><a href="index.html">Simulator</a><a href="rechner.html">Rechner</a><a href="tracker.html">Tracker</a><a href="regeln.html" aria-current="page">Regeln</a></nav>
+  <header>
+    <h1>Regeln</h1>
+    <p>Je Firma zuerst, wie viele Accounts gleichzeitig erlaubt sind, darunter alle Regeln je Plan mit den Größen als Spalten.</p>
+  </header>
+
+  <div class="rg-intro">
+    <p class="warn rg-hint" id="rg-hint">Maßgeblich ist immer das Help Center der Firma. Regeln und Limits ändern sich oft.</p>
+    <p class="note" id="rg-noban">Für Alpha Futures und FundedNext Futures liegt hier kein Einzelbeleg zum Verbot von Gegenpositionen vor. Vor dem Handel im Help Center prüfen.</p>
+    <p class="note" id="rg-sheet">Die Tabellen zeigen das Regelblatt des Simulators je Plan, die Größen als Spalten. „im Modell“ meint die Abbildung im Simulator.</p>
+  </div>
+
+  <div class="panel rg-bar">
+    <label class="rg-f">Firma <select class="sel" id="rg-firm"></select></label>
+    <label class="rg-f">Markt <select class="sel" id="rg-market"><option value="all">alle</option><option value="Futures">Futures</option><option value="CFD">CFD</option></select></label>
+    <nav class="rg-jump" id="rg-jump" aria-label="Firmen"></nav>
+  </div>
+
+  <p class="note" id="rg-empty" hidden>Keine Firma im Filter.</p>
+  <div class="rg-body" id="rg-body"></div>
+</div>
+<script src="js/offers.js"></script>
+<script src="js/explain.js"></script>
+<script src="js/firms.js"></script>
+<script src="js/regelnUi.js"></script>
+</body>
+</html>
